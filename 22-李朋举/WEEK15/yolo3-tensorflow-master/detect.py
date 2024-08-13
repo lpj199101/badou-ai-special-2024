@@ -1,6 +1,5 @@
 import os
 import config
-import h5py
 import argparse
 import numpy as np
 import tensorflow as tf
@@ -77,7 +76,7 @@ def detect(image_path, model_path, yolo_weights=None):
         # ---------------------------------------#
         #   画框
         # ---------------------------------------#
-        # 找到几个box，打印
+        # 找到几个box，打印  -> Found 11 boxes for img
         print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
         font = ImageFont.truetype(font='font/FiraMono-Medium.otf', size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
 
@@ -106,7 +105,17 @@ def detect(image_path, model_path, yolo_weights=None):
             right = min(image.size[0] - 1, np.floor(right + 0.5).astype('int32'))
             print(label, (left, top), (right, bottom))
             print(label_size)
-
+            '''
+            umbrella 0.83 (359, 234) (406, 256)
+            (91, 11)
+            umbrella 0.99 (46, 235) (100, 264)
+            (91, 11)
+            traffic light 1.00 (336, 46) (368, 138)
+            (126, 14)
+            ...
+            person 1.00 (366, 253) (408, 348)
+            (77, 14)
+            '''
             if top - label_size[1] >= 0:
                 text_origin = np.array([left, top - label_size[1]])
             else:
