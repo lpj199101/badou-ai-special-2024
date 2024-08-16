@@ -114,7 +114,7 @@ class yolo_predictor:
         # 寻找在原图上的位置
         boxes = self.correct_boxes(box_xy, box_wh, input_shape, image_shape)
         boxes = tf.reshape(boxes, [-1, 4])
-        # 获得类别置信度 box_confidence * box_class_probs    标定狂的置信度 X 当前目标属于每个框的分类概率
+        # 获得类别置信度 box_confidence * box_class_probs    标定框的置信度 X 当前目标属于每个框的分类概率
         box_scores = box_confidence * box_class_probs
         box_scores = tf.reshape(box_scores, [-1, classes_num])  # Tensor("predict/Reshape_5:0", shape=(?, 80), dtype=float32)
         return boxes, box_scores
@@ -200,8 +200,8 @@ class yolo_predictor:
         num_anchors = len(anchors)  # 3
         # Tensor("predict/Reshape:0", shape=(1, 1, 1, 3, 2), dtype=float32)
         anchors_tensor = tf.reshape(tf.constant(anchors, dtype=tf.float32), [1, 1, 1, num_anchors, 2])
-        # 获取张量feats的第 1 维和第 2 维的尺寸，并将其存储在变量grid_size中  Tensor("predict/strided_slice_1:0", shape=(2,), dtype=int32)
-        grid_size = tf.shape(feats)[1:3]
+        # 获取张量feats的第 2 维和第3 维的尺寸，并将其存储在变量grid_size中  Tensor("predict/strided_slice_1:0", shape=(2,), dtype=int32)
+        grid_size = tf.shape(feats)[1:3]  # 13,13
         # 对张量 feats 进行重整形 Tensor("predict/Reshape_1:0", shape=(?, ?, ?, 3, 85), dtype=float32)
         predictions = tf.reshape(feats, [-1, grid_size[0], grid_size[1], num_anchors, num_classes + 5])
 
