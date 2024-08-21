@@ -55,7 +55,13 @@ def clip_boxes_graph(boxes, window):
     # 返回裁剪后的边界框张量
     return clipped
 
-
+'''
+Proposal Layers 按照以下顺序一次处理：
+  1.利用变换量对所有的 positive anchors 做 bbox regression回归 ->(近似值)
+  2.按照输入的 positive softmax scores 由大到小排序 anchors, 提取钱 pre_nms_topN(6000)个anchors，即提取修正位置后的 positive anchors
+  3.对剩余的 positive anchors 进行 NMS
+  4.输出 proposals
+'''
 class ProposalLayer(Layer):  # 定义 ProposalLayer 的类，它继承自 Layer 类
 
     # 通过调用父类的初始化方法来初始化父类(Layer)的属性
