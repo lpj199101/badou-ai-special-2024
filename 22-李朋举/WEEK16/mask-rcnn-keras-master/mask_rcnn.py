@@ -132,6 +132,7 @@ class MASK_RCNN(object):
             "masks": final_masks,
         }
 
+        # 画图(开源工具)
         visualize.display_instances(image[0], r['rois'], r['masks'], r['class_ids'],
                                     self.class_names, r['scores'])
 

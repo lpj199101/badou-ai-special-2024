@@ -48,7 +48,7 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2),
     return x
 
 
-#  特征金字塔FPN的构建: (参考 特征金字塔(FPN) 图)
+#  Resent101 特征金字塔FPN的构建: (参考 特征金字塔(FPN) 图)
 def get_resnet(input_image, stage5=False, train_bn=True):
 
     # Stage 1

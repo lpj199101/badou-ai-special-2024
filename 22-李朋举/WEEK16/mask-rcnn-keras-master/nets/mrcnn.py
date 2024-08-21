@@ -31,12 +31,12 @@ def rpn_graph(feature_map, anchors_per_location):  # feature_map：输入的特�
     # 中间结果 代表这个先验框对应的类
     rpn_class_logits = Reshape([-1, 2])(x)  # 将卷积结果进行重整形，使其变为 [batch_size, num_anchors, 2] 的形状，其中 num_anchors 是锚点的数量
 
-    # 分支1 正负
+    # RPN分支1  分类结果-对每个分类正负
     rpn_probs = Activation("softmax", name="rpn_class_xxx")(rpn_class_logits)  # 对类别预测结果进行 Softmax 激活，得到每个锚点属于不同类别的概率
 
     x = Conv2D(anchors_per_location * 4, (1, 1), padding="valid", activation='linear', name='rpn_bbox_pred')(shared)
     # batch_size,num_anchors,4
-    # 分支2 偏移量  这个先验框的调整参数
+    # RPN分支2  回归结果-偏移量  这个先验框的调整参数
     rpn_bbox = Reshape([-1, 4])(x)  # 将卷积结果进行重整形，使其变为 [batch_size, num_anchors, 4] 的形状，其中 num_anchors 是锚点的数量
 
     return [rpn_class_logits, rpn_probs, rpn_bbox]
@@ -99,6 +99,7 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
     return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
 
 
+# 结果3 mask : ROI Align -> Conv(4个,ppt中2个) -> 上采样到原图(反卷积Conv2DTranspose)
 def build_fpn_mask_graph(rois, feature_maps, image_meta,
                          pool_size, num_classes, train_bn=True):
     # ROI Align，利用建议框在特征层上进行截取
@@ -144,7 +145,7 @@ def build_fpn_mask_graph(rois, feature_maps, image_meta,
 
 
 def get_predict_model(config):
-    h, w = config.IMAGE_SHAPE[:2]  # 获取配置中的图像高度 h 和宽度 w
+    h, w = config.IMAGE_SHAPE[:2]  # 获取配置中的图像高度 h 和宽度 w, 必须能狗被2的6次方整除, 上采样时需要
     if h / 2 ** 6 != int(h / 2 ** 6) or w / 2 ** 6 != int(w / 2 ** 6):
         raise Exception("Image size must be dividable by 2 at least 6 times "
                         "to avoid fractions when downscaling and upscaling."
@@ -158,9 +159,9 @@ def get_predict_model(config):
     # None 表示输入张量的第一维（通常是批量大小）可以是任意大小,4 表示输入张量的第二维的大小为 4, 这种灵活性允许模型处理不同大小的批量输入。在训练或预测时，可以根据实际情况动态地调整批量大小，而不需要固定为某个特定的值。
     input_anchors = Input(shape=[None, 4], name="input_anchors")
 
-    # -----------------------------------------------#
+    # --------------------------------------------------#
     #  【网络结构-1.卷积部分CNN】 Resnet101 + 特征金字塔FPN
-    # -----------------------------------------------#
+    # --------------------------------------------------#
     '''
     主干部分Resnet101：
        获得Resnet101里的压缩程度不同的一些层
@@ -203,29 +204,29 @@ def get_predict_model(config):
     # Height/64,Width/64,256
     P6 = MaxPooling2D(pool_size=(1, 1), strides=2, name="fpn_p6")(P5)
 
-    # 定义 RPN 特征图 P2, P3, P4, P5, P6可以用于获取建议框
+    # 定义 RPN 特征图 P2, P3, P4, P5, P6 可以用于获取建议框(P6只在训练当中使用) -> rpn_feature_maps训练当中使用
     rpn_feature_maps = [P2, P3, P4, P5, P6]
-    # 定义 Mask RCNN 特征图P2, P3, P4, P5用于获取mask信息
+    # 定义 Mask RCNN 特征图P2, P3, P4, P5用于获取mask信息(推理当中使用) -> mrcnn_feature_maps推理当中使用
     mrcnn_feature_maps = [P2, P3, P4, P5]
 
     # 将输入的先验框作为锚点
     anchors = input_anchors
 
-    # -----------------------------------------------------------------------------------------------------#
+    # -----------------------------------------------------------------------------------------------------------#
     #  【网络结构-2.RPN部分】 分支1：正负(每个框对于所有类别) + 分支2：偏移量 + ProposalLayer合并分支1、2得到每个点的建议框
-    # -----------------------------------------------------------------------------------------------------#
+    # -----------------------------------------------------------------------------------------------------------#
     rpn = build_rpn_model(len(config.RPN_ANCHOR_RATIOS), config.TOP_DOWN_PYRAMID_SIZE)
 
     # 初始化 RPN 网络的预测结果
     rpn_class_logits, rpn_class, rpn_bbox = [], [], []
 
-    # 进行格式调整，把五个特征层的结果进行堆叠
+    # 获得RPN网络的预测结果，进行格式调整，把五个特征层的结果进行堆叠
     for p in rpn_feature_maps:
         logits, classes, bbox = rpn([p])  # 对每个 RPN 特征图进行 RPN 网络的预测，获得RPN网络的预测结果  中间结果logits 分支1正负 分支2偏移量
         rpn_class_logits.append(logits)   # 并将结果添加到相应的列表 rpn_class_logits 中 -> 中间结果
         rpn_class.append(classes)  # 并将结果添加到相应的列表 rpn_class 中 -> 分支1正负(对每个类别)
         rpn_bbox.append(bbox)  # 并将结果添加到相应的列表 rpn_bbox 中 -> 分支2偏移量
-
+    # 加到一起
     rpn_class_logits = Concatenate(axis=1, name="rpn_class_logits")(rpn_class_logits)
     rpn_class = Concatenate(axis=1, name="rpn_class")(rpn_class)
     rpn_bbox = Concatenate(axis=1, name="rpn_bbox")(rpn_bbox)
@@ -237,7 +238,7 @@ def get_predict_model(config):
     proposal_count = config.POST_NMS_ROIS_INFERENCE  # 获取建议框的数量
 
     # Batch_size, proposal_count, 4
-    # 对先验框进行解码  使用建议框生成层生成建议框
+    # ProposalLayer部分 对先验框进行解码  使用建议框生成层生成建议框
     '''
     
     '''
@@ -248,17 +249,31 @@ def get_predict_model(config):
         config=config)([rpn_class, rpn_bbox, anchors])
 
     # 进行分类和回归任务，得到最终的检测结果  获得classifier的结果
+    # ----------------------------------------------------------------------------#
+    #   【
+    #     网络结构-3 ROIAlign部分 -> 最终的预测框
+    #     网络结构-4 FC部分(分类+回归) -> FC1 - 分类  获得classifier的结果
+    #                                   FC2 - 回归  获得最终的检测结果
+    #                                                                    】
+    # ----------------------------------------------------------------------------#
     mrcnn_class_logits, mrcnn_class, mrcnn_bbox = \
         fpn_classifier_graph(rpn_rois, mrcnn_feature_maps, input_image_meta,
                              config.POOL_SIZE, config.NUM_CLASSES,
                              train_bn=config.TRAIN_BN,
                              fc_layers_size=config.FPN_CLASSIF_FC_LAYERS_SIZE)
+
+    # ---------- 以上是和fast-r-cnn类似的部分--------------------------------------------------------
+
     # 使用检测层对检测结果进行处理
     detections = DetectionLayer(config, name="mrcnn_detection")(
         [rpn_rois, mrcnn_class, mrcnn_bbox, input_image_meta])
     # 获取检测框的坐标
     detection_boxes = Lambda(lambda x: x[..., :4])(detections)
-    # 获得mask的结果
+
+    # --------------------------------------------------------------------------------------------------------------#
+    #   【Mask部分】
+    #    结果3 mask : ROI Align -> Conv(4个,ppt中2个) -> 上采样到原图(反卷积Conv2DTranspose) -> 1X1卷积得到K个通道(K*M*M)
+    # --------------------------------------------------------------------------------------------------------------#
     mrcnn_mask = build_fpn_mask_graph(detection_boxes, mrcnn_feature_maps,
                                       input_image_meta,
                                       config.MASK_POOL_SIZE,

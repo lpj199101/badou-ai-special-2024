@@ -4,9 +4,11 @@ import logging
 import skimage.color
 import skimage.io
 import skimage.transform
-#----------------------------------------------------------#
+
+
+# ----------------------------------------------------------#
 #  Dataset
-#----------------------------------------------------------#
+# ----------------------------------------------------------#
 
 class Dataset(object):
     # 数据集训练的基本格式
@@ -47,6 +49,7 @@ class Dataset(object):
         def clean_name(name):
             """Returns a shorter version of object names for cleaner display."""
             return ",".join(name.split(",")[:1])
+
         # 分多少类
         self.num_classes = len(self.class_info)
         # 种类的id
