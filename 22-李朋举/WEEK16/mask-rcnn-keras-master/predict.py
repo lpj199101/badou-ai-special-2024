@@ -14,4 +14,3 @@ while True:
     else:
         mask_rcnn.detect_image(image)
 mask_rcnn.close_session()
-    
