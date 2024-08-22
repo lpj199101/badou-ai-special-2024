@@ -222,7 +222,7 @@ class Config(object):
 
         # Image meta data length
         # See compose_image_meta() for details  通过调用 compose_image_meta() 函数来计算图像元数据的长度，并将结果存储在 IMAGE_META_SIZE 中。
-        self.IMAGE_META_SIZE = 1 + 3 + 3 + 4 + 1 + self.NUM_CLASSES  # 13
+        self.IMAGE_META_SIZE = 1 + 3 + 3 + 4 + 1 + self.NUM_CLASSES
 
     # 定义了一个名为 `display` 的方法，用于显示配置信息
     def display(self):

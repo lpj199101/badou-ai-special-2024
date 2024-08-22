@@ -67,10 +67,13 @@ class MASK_RCNN(object):
     # -------------------------------------------------------------------------------#
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)  # 获取类文件的路径，并使用 `os.path.expanduser` 函数将其扩展为完整的用户目录路径
-        with open(classes_path) as f:  # 打开类文件，并将文件对象赋值给变量 `f`
-            class_names = f.readlines()  # 读取类文件中的所有行，并将它们存储在列表 `class_names` 中
-        class_names = [c.strip() for c in class_names]  # 对列表中的每个元素（类名称）进行处理，使用 `strip` 方法去除前后的空格和换行符
-        class_names.insert(0, "BG")  # 在类名称列表的开头插入一个名为 "BG" 的元素
+        with open(classes_path) as f:  # 打开类文件，并将文件对象赋值给变量 `f`  classes_path:'model_data/coco_classes.txt'
+            # 读取类文件中的所有行，并将它们存储在列表 `class_names` 中  {list:80}['person\n', 'bicycle\n', 'car\n', ... , 'toothbrush\n']
+            class_names = f.readlines()
+        # .strip() 方法用于移除字符串两端的空格或指定的字符
+        # 对列表中的每个元素（类名称）进行处理，使用 `strip` 方法去除前后的空格和换行符 {list:80}['person', 'bicycle', 'car', ..., 'toothbrush']
+        class_names = [c.strip() for c in class_names]
+        class_names.insert(0, "BG")  # 在类名称列表的开头插入一个名为 "BG" 的元素 {list:81}['BG', 'person', 'bicycle', ..., 'toothbrush']
         return class_names  # 返回处理后的类别名称列表
 
     # -------------------------------------------------------------------------------#
@@ -81,11 +84,11 @@ class MASK_RCNN(object):
             NUM_CLASSES = len(self.class_names)  # 类的数量，通过计算 `self.class_names` 的长度来确定
             GPU_COUNT = 1  # GPU 的数量，设置为 1
             IMAGES_PER_GPU = 1  # ：每个 GPU 处理的图像数量，设置为 1
-            DETECTION_MIN_CONFIDENCE = self.confidence  # 检测的最小置信度，通过 `self.confidence` 获取
+            DETECTION_MIN_CONFIDENCE = self.confidence  # 检测的最小置信度，通过 `self.confidence` 获取  0.7
             NAME = "shapes"  # 名称，设置为 "shapes"
-            RPN_ANCHOR_SCALES = self.RPN_ANCHOR_SCALES  # 锚点的尺度，通过 `self.RPN_ANCHOR_SCALES` 获取
-            IMAGE_MIN_DIM = self.IMAGE_MIN_DIM  # 图像的最小维度，通过 `self.IMAGE_MIN_DIM` 获取
-            IMAGE_MAX_DIM = self.IMAGE_MAX_DIM  # 图像的最大维度，通过 `self.IMAGE_MAX_DIM` 获取
+            RPN_ANCHOR_SCALES = self.RPN_ANCHOR_SCALES  # 锚点的尺度 {tuple:5} (32, 64, 128, 256, 512)
+            IMAGE_MIN_DIM = self.IMAGE_MIN_DIM  # 图像的最小维度  1024
+            IMAGE_MAX_DIM = self.IMAGE_MAX_DIM  # 图像的最大维度  1024
 
         config = InferenceConfig()  # 创建了一个 `InferenceConfig` 对象，并将其赋值给变量 `config`
         config.display()  # 显示配置信息
@@ -95,11 +98,11 @@ class MASK_RCNN(object):
     #   3.生成模型
     # ---------------------------------------------------#
     def generate(self):
-        model_path = os.path.expanduser(self.model_path)
+        model_path = os.path.expanduser(self.model_path)  # 'model_data/mask_rcnn_coco.h5'
         assert model_path.endswith('.h5'), 'Keras model or weights must be a .h5 file.'
 
         # 计算总的种类
-        self.num_classes = len(self.class_names)
+        self.num_classes = len(self.class_names)  # 81
 
         # 载入模型，如果原来的模型里已经包括了模型结构则直接载入。
         # 否则先构建模型再载入

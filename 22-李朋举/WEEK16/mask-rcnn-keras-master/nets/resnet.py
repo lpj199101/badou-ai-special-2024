@@ -1,7 +1,7 @@
 from keras.layers import ZeroPadding2D, Conv2D, MaxPooling2D, BatchNormalization, Activation, Add
 
 
-# 参考 Resnet(conv_block+identity_block) 图
+# 参考 Resnet(conv_block+identity_block) 图    identity_block: 串联：输入输出维度一样，网络加深
 def identity_block(input_tensor, kernel_size, filters, stage, block, use_bias=True, train_bn=True):
     nb_filter1, nb_filter2, nb_filter3 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
@@ -23,7 +23,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block, use_bias=Tr
     return x
 
 
-# 参考 Resnet(conv_block+identity_block) 图
+# 参考 Resnet(conv_block+identity_block) 图   conv_block：并联,输入输出维度不一样，改变了网络的维度
 def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2), use_bias=True, train_bn=True):
     nb_filter1, nb_filter2, nb_filter3 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
@@ -48,10 +48,11 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2),
     return x
 
 
-#  Resent101 特征金字塔FPN的构建: (参考 特征金字塔(FPN) 图)
+#  Resent101 特征金字塔FPN的构建: (参考 Resnet + 特征金字塔(FPN) 图)
+#            input_image:Tensor("input_image:0", shape=(?, ?, ?, 3), dtype=float32)   stage5:true  train_bn:false
 def get_resnet(input_image, stage5=False, train_bn=True):
 
-    # Stage 1
+    # Stage 1  (?, ?, ?, 3) -> (?, ?, ?, 64)
     x = ZeroPadding2D((3, 3))(input_image)  # 对输入图像进行零填充，使其在水平和垂直方向上各增加 3 个像素。
     x = Conv2D(64, (7, 7), strides=(2, 2), name='conv1', use_bias=True)(x)  # 使用 7x7 的卷积核对填充后的图像进行卷积操作，输出通道数为 64，步长为 2
     x = BatchNormalization(name='bn_conv1')(x, training=train_bn)  # 对卷积后的结果进行批量归一化处理
@@ -59,20 +60,20 @@ def get_resnet(input_image, stage5=False, train_bn=True):
     # Height/4,Width/4,64
     C1 = x = MaxPooling2D((3, 3), strides=(2, 2), padding="same")(x)  # 行最大池化操作，池化窗口大小为 3x3，步长为 2，填充方式为 "same"
 
-    # Stage 2
+    # Stage 2   (?, ?, ?, 64) -> (?, ?, ?, 256)
     x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1), train_bn=train_bn)
     x = identity_block(x, 3, [64, 64, 256], stage=2, block='b', train_bn=train_bn)
     # Height/4,Width/4,256
     C2 = x = identity_block(x, 3, [64, 64, 256], stage=2, block='c', train_bn=train_bn)
 
-    # Stage 3
+    # Stage 3   (?, ?, ?, 256) -> (?, ?, ?, 512)
     x = conv_block(x, 3, [128, 128, 512], stage=3, block='a', train_bn=train_bn)
     x = identity_block(x, 3, [128, 128, 512], stage=3, block='b', train_bn=train_bn)
     x = identity_block(x, 3, [128, 128, 512], stage=3, block='c', train_bn=train_bn)
     # Height/8,Width/8,512
     C3 = x = identity_block(x, 3, [128, 128, 512], stage=3, block='d', train_bn=train_bn)
 
-    # Stage 4
+    # Stage 4   (?, ?, ?, 512) -> (?, ?, ?, 1024)
     x = conv_block(x, 3, [256, 256, 1024], stage=4, block='a', train_bn=train_bn)
     block_count = 22
     for i in range(block_count):
@@ -80,7 +81,7 @@ def get_resnet(input_image, stage5=False, train_bn=True):
     # Height/16,Width/16,1024
     C4 = x
 
-    # Stage 5
+    # Stage 5  (?, ?, ?, 1024) -> (?, ?, ?, 2048)
     if stage5:  # 判断是否需要获取第五阶段的输出
         x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', train_bn=train_bn)
         x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b', train_bn=train_bn)
@@ -88,4 +89,11 @@ def get_resnet(input_image, stage5=False, train_bn=True):
         C5 = x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c', train_bn=train_bn)
     else:
         C5 = None
+    '''
+      C1:Tensor("max_pooling2d_1/MaxPool:0", shape=(?, ?, ?, 64), dtype=float32)  
+      C2:Tensor("res2c_out/Relu:0", shape=(?, ?, ?, 256), dtype=float32) 
+      C3:Tensor("res3d_out/Relu:0", shape=(?, ?, ?, 512), dtype=float32)
+      C4:Tensor("res4w_out/Relu:0", shape=(?, ?, ?, 1024), dtype=float32) 
+      C5:Tensor("res5c_out/Relu:0", shape=(?, ?, ?, 2048), dtype=float32)
+    '''
     return [C1, C2, C3, C4, C5]  # 返回 ResNet 网络的不同阶段的输出

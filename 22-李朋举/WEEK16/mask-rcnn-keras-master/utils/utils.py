@@ -522,7 +522,7 @@ def compute_recall(pred_boxes, gt_boxes, iou):
     return recall, positive_ids
 
 # batch_slice 函数的作用是将批量数据分成多个切片，并对每个切片应用相同的计算图，最后将结果合并。这样可以在一次计算中处理多个数据样本，提高计算效率
-# inputs（输入张量列表）、graph_fn（计算图函数）、batch_size（切片数量）和 names（结果张量的名称列表
+# inputs（输入张量列表）Tensor("ROI/strided_slice:0", shape=(?, ?), dtype=float32)、Tensor("ROI/top_anchors:1", shape=(?, ?), dtype=int32)      、graph_fn（计算图函数）、batch_size（切片数量）1 和 names（结果张量的名称列表
 def batch_slice(inputs, graph_fn, batch_size, names=None):
     """Splits inputs into slices and feeds each slice to a copy of the given
     computation graph and then combines the results. It allows you to run a
