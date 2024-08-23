@@ -22,9 +22,9 @@ from distutils.version import LooseVersion
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
 
 
-#----------------------------------------------------------#
+# ----------------------------------------------------------#
 #  Bounding Boxes
-#----------------------------------------------------------#
+# ----------------------------------------------------------#
 
 def extract_bboxes(mask):
     # 利用语义分割的mask找到包围它的框
@@ -88,7 +88,7 @@ def compute_overlaps_masks(masks1, masks2):
     """Computes IoU overlaps between two sets of masks.
     masks1, masks2: [Height, Width, instances]
     """
-    
+
     # If either set of masks is empty return empty result
     if masks1.shape[-1] == 0 or masks2.shape[-1] == 0:
         return np.zeros((masks1.shape[-1], masks2.shape[-1]))
@@ -259,7 +259,7 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None, mode="square
         right_pad = max_dim - w - left_pad
 
         # 向四周进行填充
-        padding = [(top_pad, bottom_pad), (left_pad, right_pad), (0,0)]
+        padding = [(top_pad, bottom_pad), (left_pad, right_pad), (0, 0)]
         image = np.pad(image, padding, mode='constant', constant_values=0)
         window = (top_pad, left_pad, h + top_pad, w + left_pad)
     elif mode == "pad64":
@@ -368,9 +368,10 @@ def unmold_mask(mask, bbox, image_shape):
     full_mask[y1:y2, x1:x2] = mask
     return full_mask
 
-#----------------------------------------------------------#
+
+# ----------------------------------------------------------#
 #  Miscellaneous
-#----------------------------------------------------------#
+# ----------------------------------------------------------#
 
 def trim_zeros(x):
     """It's common to have tensors larger than the available data and
@@ -486,14 +487,14 @@ def compute_ap_range(gt_box, gt_class_id, gt_mask,
     """Compute AP over a range or IoU thresholds. Default range is 0.5-0.95."""
     # Default is 0.5 to 0.95 with increments of 0.05
     iou_thresholds = iou_thresholds or np.arange(0.5, 1.0, 0.05)
-    
+
     # Compute AP over range of IoU thresholds
     AP = []
     for iou_threshold in iou_thresholds:
-        ap, precisions, recalls, overlaps =\
+        ap, precisions, recalls, overlaps = \
             compute_ap(gt_box, gt_class_id, gt_mask,
-                        pred_box, pred_class_id, pred_score, pred_mask,
-                        iou_threshold=iou_threshold)
+                       pred_box, pred_class_id, pred_score, pred_mask,
+                       iou_threshold=iou_threshold)
         if verbose:
             print("AP @{:.2f}:\t {:.3f}".format(iou_threshold, ap))
         AP.append(ap)
@@ -521,41 +522,85 @@ def compute_recall(pred_boxes, gt_boxes, iou):
     recall = len(set(matched_gt_boxes)) / gt_boxes.shape[0]
     return recall, positive_ids
 
+
 # batch_slice 函数的作用是将批量数据分成多个切片，并对每个切片应用相同的计算图，最后将结果合并。这样可以在一次计算中处理多个数据样本，提高计算效率
-# inputs（输入张量列表）Tensor("ROI/strided_slice:0", shape=(?, ?), dtype=float32)、Tensor("ROI/top_anchors:1", shape=(?, ?), dtype=int32)      、graph_fn（计算图函数）、batch_size（切片数量）1 和 names（结果张量的名称列表
 def batch_slice(inputs, graph_fn, batch_size, names=None):
-    """Splits inputs into slices and feeds each slice to a copy of the given
-    computation graph and then combines the results. It allows you to run a
-    graph on a batch of inputs even if the graph is written to support one
-    instance only.
+    """
+    Splits inputs into slices and feeds each slice to a copy of the given computation graph and then combines the results.
+    It allows you to run a graph on a batch of inputs even if the graph is written to support one instance only.
 
     inputs: list of tensors. All must have the same first dimension length
-    graph_fn: A function that returns a TF tensor that's part of a graph.
-    batch_size: number of slices to divide the data into.
-    names: If provided, assigns names to the resulting tensors.
+         inputs（输入张量列表）  [scores, ix]  -> Tensor("ROI/strided_slice:0", shape=(?, ?), dtype=float32)、  Tensor("ROI/top_anchors:1", shape=(?, ?), dtype=int32)
+    graph_fn: A function that returns a TF tensor that's part of a graph.     计算图函数
+    batch_size: number of slices to divide the data into.                     切片数量 1
+    names: If provided, assigns names to the resulting tensors.               结果张量的名称列表
     """
     if not isinstance(inputs, list):  # 函数检查输入是否为列表，如果不是，则将其转换为列表
         inputs = [inputs]
-
+        # [scores, ix]  -> Tensor("ROI/strided_slice:0", shape=(?, ?), dtype=float32)、  Tensor("ROI/top_anchors:1", shape=(?, ?), dtype=int32)
     outputs = []  # 创建一个空列表 outputs 用于存储每个切片的结果
     for i in range(batch_size):  # 循环
-        inputs_slice = [x[i] for x in inputs]  # 将输入数据按照切片数量进行分割，得到每个切片的输入数据 inputs_slice
-        output_slice = graph_fn(*inputs_slice)  # 调用 graph_fn 函数对每个切片的输入数据进行计算，得到输出结果 output_slice
+        '''
+        将输入数据按照切片数量进行分割，得到每个切片的输入数据 inputs_slice  
+        [<tf.Tensor 'ROI/strided_slice_2:0' shape=(?,) dtype=float32>, <tf.Tensor 'ROI/strided_slice_3:0' shape=(?,) dtype=int32>]'''
+        inputs_slice = [x[i] for x in inputs]
+        '''调用 graph_fn 函数对每个切片的输入数据进行计算，得到输出结果 output_slice  Tensor("ROI/GatherV2:0", shape=(?,), dtype=float32)'''
+        output_slice = graph_fn(*inputs_slice)
         if not isinstance(output_slice, (tuple, list)):
             output_slice = [output_slice]
         outputs.append(output_slice)
     # Change outputs from a list of slices where each is
     # a list of outputs to a list of outputs and each has
-    # a list of slices
+    # a list of slices   outputs [[<tf.Tensor 'ROI/GatherV2:0' shape=(?,) dtype=float32>]]
+    '''
+    `*outputs` 是 Python 中的一种特殊语法，用于将列表或元组中的元素作为独立的参数传递给函数。
+        这里，`outputs` 是一个列表，通过使用 `*outputs`，你可以将列表中的每个元素作为独立的参数传递给 `zip()` 函数。
+     `zip()` 是 Python 中的一个内置函数，用于将多个可迭代对象（如列表、元组等）组合成一个元组序列：
+            zip(iterable1, iterable2,...)  其中，`iterable1, iterable2,...` 是要组合的可迭代对象。`zip()` 函数会返回一个迭代器，该迭代器可以逐个访问组合后的元组。     
+                下面是一个简单的示例，展示了如何使用 `zip()` 函数：
+                    numbers = [1, 2, 3]
+                    letters = ['a', 'b', 'c']
+                    zipped = zip(numbers, letters)      # 组合成了一个元组序列。每个元组包含了一个数字和一个对应的字母(如：1对应a...)
+                    # 可以通过迭代访问组合后的元组
+                        for item in zipped:
+                            print(item)                 # (1, 'a')   (2, 'b')   (3, 'c')
+                上面的示例中，`zip(numbers, letters)` 将数字列表和字母列表组合成一个元组序列。通过迭代访问这个元组序列，可以得到每个数字和对应的字母组成的元组。
+            需要注意的是，`zip()` 函数返回的是一个迭代器，而不是一个具体的列表或元组。如果需要将组合后的元组序列转换为列表或元组，可以使用 `list()` 或 `tuple()` 函数进行转换。
+            此外，`zip()` 函数的长度是由最短的可迭代对象决定的。如果可迭代对象的长度不一致，那么 `zip()` 函数会在最短的可迭代对象结束时停止。     
+        这里,它会将 `outputs` 列表中的每个元素作为一个独立的可迭代对象，并将它们组合成一个元组序列。
+        这样做的效果是将 `outputs` 列表中的元素按照顺序进行配对，形成一系列的元组。每个元组包含了原来列表中对应位置的元素。
+    list() 是 Python 中的一个内置函数，用于创建一个新的列表对象。它可以接受一个可迭代对象作为参数，并将其元素添加到新创建的列表中。
+    '''
     outputs = list(zip(*outputs))  # 对 outputs 列表进行转置，将每个输出结果的切片组合在一起
 
     if names is None:  # 如果提供了名称列表 names，则为每个结果张量设置名称
-        names = [None] * len(outputs)
+        names = [None] * len(outputs)  # [None] = [None] * 1
 
-    # 使用 tf.stack 函数将每个输出结果的切片堆叠在一起，得到最终的结果张量
-    result = [tf.stack(o, axis=0, name=n)
-              for o, n in zip(outputs, names)]
-    if len(result) == 1:  # 如果结果张量只有一个，则直接返回该张量，否则返回列表形式的结果张量
+    # 使用 tf.stack 函数将每个输出结果的切片堆叠在一起，得到最终的结果张量  [<tf.Tensor 'ROI/packed:0' shape=(1, ?) dtype=float32>]
+    '''
+    tf.stack() 是 TensorFlow 中的一个函数，用于沿着指定的轴堆叠张量列表。它接受一个张量列表作为输入，并返回一个通过沿着指定轴堆叠输入张量而形成的单个张量
+       使用 `tf.stack()` 函数堆叠张量时，要求待堆叠的张量在除了指定的堆叠轴之外的其他维度上具有相同的形状。
+       例如，如果要沿着第一个轴堆叠两个张量 `tensor1` 和 `tensor2`，那么它们在第二个和第三个维度上的形状必须相同。
+            如果张量的维度不一致，可能会导致以下错误：ValueError: Dimensions must be equal, but are 3 and 2 for 'stack' (op: 'Stack') with input shapes: [2,3], [2,2].
+       为了确保张量可以正确堆叠，你可以在堆叠之前对它们进行预处理，例如通过填充或裁剪使其具有相同的形状。
+    举例：
+           tensor1 = [[1, 2, 3], [4, 5, 6]]  tensor2  = [[7, 8, 9],   [10, 11, 12]]
+           tensors = [tensor1 ，tensor2]
+           stacked_tensor = tf.stack(tensors, axis=0)
+        在这个例子中，`tensor1` 和 `tensor2` 是两个 2x3 的张量。然后，我们将这两个张量放在一个列表 `tensors` 中。
+        接下来，使用 `tf.stack()` 函数将 `tensors` 列表中的张量沿着第一个轴（`axis=0`）进行堆叠。
+        这将创建一个新的张量 `stacked_tensor`，它的形状为 2x2x3，其中第一个维度是原来的两个张量，第二个维度是原来的行数，第三个维度是原来的列数。        
+        ```
+            [[[1, 2, 3],
+              [4, 5, 6]],
+            
+             [[7, 8, 9],
+              [10, 11, 12]]]
+        ```
+        这就是 `tf.stack()` 函数的基本用法。通过指定不同的轴，你可以在不同的维度上进行堆叠操作。
+    '''
+    result = [tf.stack(o, axis=0, name=n) for o, n in zip(outputs, names)]
+    if len(result) == 1:  # 如果结果张量只有一个，则直接返回该张量，否则返回列表形式的结果张量  Tensor("ROI/packed:0", shape=(1, ?), dtype=float32)
         result = result[0]
 
     return result
@@ -639,6 +684,7 @@ def mold_image(images, config):
     """
     return images.astype(np.float32) - config.MEAN_PIXEL
 
+
 def compose_image_meta(image_id, original_image_shape, image_shape,
                        window, scale, active_class_ids):
     """Takes attributes of an image and puts them in one 1D array.
@@ -654,14 +700,15 @@ def compose_image_meta(image_id, original_image_shape, image_shape,
         where not all classes are present in all datasets.
     """
     meta = np.array(
-        [image_id] +                  # size=1
+        [image_id] +  # size=1
         list(original_image_shape) +  # size=3
-        list(image_shape) +           # size=3
-        list(window) +                # size=4 (y1, x1, y2, x2) in image cooredinates
-        [scale] +                     # size=1
-        list(active_class_ids)        # size=num_classes
+        list(image_shape) +  # size=3
+        list(window) +  # size=4 (y1, x1, y2, x2) in image cooredinates
+        [scale] +  # size=1
+        list(active_class_ids)  # size=num_classes
     )
     return meta
+
 
 def mold_inputs(config, images):
     molded_images = []
@@ -694,7 +741,7 @@ def mold_inputs(config, images):
 
 
 def unmold_detections(detections, mrcnn_mask, original_image_shape,
-                        image_shape, window):
+                      image_shape, window):
     zero_ix = np.where(detections[:, 4] == 0)[0]
     N = zero_ix[0] if zero_ix.shape[0] > 0 else detections.shape[0]
 
@@ -725,15 +772,13 @@ def unmold_detections(detections, mrcnn_mask, original_image_shape,
 
     full_masks = []
     for i in range(N):
-
         full_mask = unmold_mask(masks[i], boxes[i], original_image_shape)
         full_masks.append(full_mask)
 
-    full_masks = np.stack(full_masks, axis=-1)\
+    full_masks = np.stack(full_masks, axis=-1) \
         if full_masks else np.empty(original_image_shape[:2] + (0,))
 
     return boxes, class_ids, scores, full_masks
-
 
 
 def norm_boxes_graph(boxes, shape):
@@ -752,12 +797,12 @@ def parse_image_meta_graph(meta):
         将包含图像属性的张量解析为其组件。
         返回解析的张量的dict。
     """
-    image_id = meta[:, 0] # 图片的id
-    original_image_shape = meta[:, 1:4] # 原始的图片的大小
+    image_id = meta[:, 0]  # 图片的id
+    original_image_shape = meta[:, 1:4]  # 原始的图片的大小
     image_shape = meta[:, 4:7]  # resize后图片的大小
     window = meta[:, 7:11]  # (y1, x1, y2, x2)有效的区域在图片中的位置
-    scale = meta[:, 11]     # 长宽的变化状况
-    active_class_ids = meta[:, 12:] 
+    scale = meta[:, 11]  # 长宽的变化状况
+    active_class_ids = meta[:, 12:]
     return {
         "image_id": image_id,
         "original_image_shape": original_image_shape,
@@ -766,4 +811,3 @@ def parse_image_meta_graph(meta):
         "scale": scale,
         "active_class_ids": active_class_ids,
     }
-

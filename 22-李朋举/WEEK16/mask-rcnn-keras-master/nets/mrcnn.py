@@ -56,6 +56,13 @@ def build_rpn_model(anchors_per_location, depth):  # anchors_per_location：3  d
 #   回归: 这个模型的预测结果会调整建议框, 获得最终的预测框
 # -----------------------------------------------#
 def fpn_classifier_graph(rois, feature_maps, image_meta, pool_size, num_classes, train_bn=True, fc_layers_size=1024):
+    """
+        rois: Tensor("ROI/packed_2:0", shape=(1, ?, 4), dtype=float32)
+        feature_maps: [P2, P3, P4, P5]
+        image_meta: Tensor("input_image_meta:0", shape=(?, 93), dtype=float32)  1 + 3 + 3 + 4 + 1 + self.NUM_CLASSES(81)
+        pool_size:  7
+        num_classes: 81
+    """
 
     # ROI Pooling，利用建议框在特征层上进行截取
     # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
@@ -222,14 +229,14 @@ def get_predict_model(config):
     mrcnn_feature_maps = [P2, P3, P4, P5]
 
     # 将输入的先验框作为锚点 Tensor("input_anchors:0", shape=(?, ?, 4), dtype=float32)
-    anchors = input_anchors
+    anchors = input_anchors  # Tensor("input_anchors:0", shape=(?, ?, 4), dtype=float32)
 
     # --------------------------------------------------------------------------------------------------------------------------#
     #  【网络结构-2.RPN部分】 分支1：正负(每个框对于所有类别) + 分支2：偏移量 + ProposalLayer合并分支1、2得到每个点的建议框
     #             RPN分支1    分类结果-对每个分类正负 上面一条通过softmax分类anchors，获得positive和negative分类
     #             RPN分支2    回归结果-偏移量  下面一条用于计算对于计算对于 anchors的bouding box regression偏移量，以获取精确的proposal
     #             Proposal层  负责综合positive anchors 和对应的bouding box regression偏移量获取proposals同时剔除太小和超出边界的proposals
-    #   到Proposal这里，相当于完成了 目标定位 的功能
+    #   到Proposal这里，相当于完成了 目标定位的功能
     # --------------------------------------------------------------------------------------------------------------------------#
     rpn = build_rpn_model(len(config.RPN_ANCHOR_RATIOS), config.TOP_DOWN_PYRAMID_SIZE)
 
@@ -243,9 +250,29 @@ def get_predict_model(config):
         rpn_class.append(classes)  # 并将结果添加到相应的列表 rpn_class 中 -> 分支1正负(对每个类别)
         rpn_bbox.append(bbox)  # 并将结果添加到相应的列表 rpn_bbox 中 -> 分支2偏移量
     # 加到一起
+    '''
+    Concatenate：沿着指定的维度将多个张量连接在一起
+    使用 `Concatenate` 层将 `rpn_class_logits` 沿着轴 1 进行拼接。`Concatenate` 层的作用是将多个输入张量沿着指定的轴进行连接，从而得到一个新的张量。
+    `name="rpn_class_logits"` 是给这个层指定的一个名称，以便在模型的可视化或调试中更容易识别和理解。
+     举例：
+           tensor1 = [[1, 2, 3],      tensor2  = [[7, 8, 9],
+                      [4, 5, 6]]                 [10, 11, 12]]
+                      
+                        [[1, 2, 3],                                          [[1, 2, 3, 7, 8, 9],
+                         [4, 5, 6]，                                          [4, 5, 6, 10, 11, 12]]
+                         [7, 8, 9],  
+                         [10, 11, 12]]
+           沿着轴 0 进行拼接”的意思是将多个张量在第1个维度上(行)连接起来            沿着轴 1 进行拼接”的意思是将多个张量在第二个维度上(列)连接起来 
+           
+     concat: 用法同上, 沿着指定的维度将多个张量连接在一起 , concat(tensors, axis)，其中 tensors 是要连接的张量列表或元组，axis 是指定的连接维度 
+             concatenated_tensor = tf.concat([tensor1, tensor2], axis=0)
+     add: 将两个张量相加, add(x, y)，其中 x 和 y 是要相加的两个张量 
+          tf.Tensor(  [[ 8 10 12]
+                       [14 16 18]],   shape=(2, 3), dtype=int32)
+    '''
     rpn_class_logits = Concatenate(axis=1, name="rpn_class_logits")(rpn_class_logits)
-    rpn_class = Concatenate(axis=1, name="rpn_class")(rpn_class)
-    rpn_bbox = Concatenate(axis=1, name="rpn_bbox")(rpn_bbox)
+    rpn_class = Concatenate(axis=1, name="rpn_class")(rpn_class)  # Tensor("rpn_class/concat:0", shape=(?, ?, 2), dtype=float32)
+    rpn_bbox = Concatenate(axis=1, name="rpn_bbox")(rpn_bbox)  # Tensor("rpn_bbox/concat:0", shape=(?, ?, 4), dtype=float32)
 
     # 此时获得的rpn_class_logits、rpn_class、rpn_bbox的维度是
     # rpn_class_logits : Batch_size, num_anchors, 2  Tensor("rpn_class_logits/concat:0", shape=(?, ?, 2), dtype=float32)
@@ -256,8 +283,11 @@ def get_predict_model(config):
     # Batch_size, proposal_count, 4
     # ProposalLayer部分 对先验框进行解码  使用建议框生成层生成建议框
 
-    # Proposal层  负责综合positive anchors 和对应的bouding box regression偏移量获取proposals同时剔除太小和超出边界的proposals
-    rpn_rois = ProposalLayer(proposal_count=proposal_count, nms_threshold=config.RPN_NMS_THRESHOLD,name="ROI",config=config)([rpn_class, rpn_bbox, anchors])
+    # Proposal层  负责综合positive anchors 和对应的bouding box regression偏移量获取proposals同时剔除太小和超出边界的proposals  Tensor("ROI/packed_2:0", shape=(1, ?, 4), dtype=float32)
+    rpn_rois = ProposalLayer(proposal_count=proposal_count,   # 1000
+                             nms_threshold=config.RPN_NMS_THRESHOLD,  # 0.7
+                             name="ROI",
+                             config=config)([rpn_class, rpn_bbox, anchors])  # Tensor("rpn_class/concat:0", shape=(?, ?, 2), dtype=float32)  Tensor("rpn_bbox/concat:0", shape=(?, ?, 4), dtype=float32) Tensor("input_anchors:0", shape=(?, ?, 4), dtype=float32)
 
     # ----------------------------------------------------------------------------#
     #   【
@@ -267,10 +297,13 @@ def get_predict_model(config):
     #                                                                   】
     # ----------------------------------------------------------------------------#
     mrcnn_class_logits, mrcnn_class, mrcnn_bbox = \
-        fpn_classifier_graph(rpn_rois, mrcnn_feature_maps, input_image_meta,
-                             config.POOL_SIZE, config.NUM_CLASSES,
-                             train_bn=config.TRAIN_BN,
-                             fc_layers_size=config.FPN_CLASSIF_FC_LAYERS_SIZE)
+        fpn_classifier_graph(rpn_rois,    # Tensor("ROI/packed_2:0", shape=(1, ?, 4), dtype=float32)
+                             mrcnn_feature_maps,  # [P2, P3, P4, P5]
+                             input_image_meta,  # Tensor("input_image_meta:0", shape=(?, 93), dtype=float32)  1 + 3 + 3 + 4 + 1 + self.NUM_CLASSES(81)
+                             config.POOL_SIZE,  # 7
+                             config.NUM_CLASSES,  # 81
+                             train_bn=config.TRAIN_BN,  # False
+                             fc_layers_size=config.FPN_CLASSIF_FC_LAYERS_SIZE)  # 1024
 
     # ---------- 以上是和fast-r-cnn类似的部分--------------------------------------------------------
 
