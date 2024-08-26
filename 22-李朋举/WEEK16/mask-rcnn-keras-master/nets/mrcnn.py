@@ -266,6 +266,7 @@ def get_predict_model(config):
            
      concat: 用法同上, 沿着指定的维度将多个张量连接在一起 , concat(tensors, axis)，其中 tensors 是要连接的张量列表或元组，axis 是指定的连接维度 
              concatenated_tensor = tf.concat([tensor1, tensor2], axis=0)
+             
      add: 将两个张量相加, add(x, y)，其中 x 和 y 是要相加的两个张量 
           tf.Tensor(  [[ 8 10 12]
                        [14 16 18]],   shape=(2, 3), dtype=int32)
@@ -282,8 +283,8 @@ def get_predict_model(config):
 
     # Batch_size, proposal_count, 4
     # ProposalLayer部分 对先验框进行解码  使用建议框生成层生成建议框
-
-    # Proposal层  负责综合positive anchors 和对应的bouding box regression偏移量获取proposals同时剔除太小和超出边界的proposals  Tensor("ROI/packed_2:0", shape=(1, ?, 4), dtype=float32)
+    # Proposal层  负责综合positive anchors 和对应的bouding box regression偏移量获取proposals, 同时剔除太小和超出边界的proposals
+    #             Tensor("ROI/packed_2:0", shape=(1, ?, 4), dtype=float32)
     rpn_rois = ProposalLayer(proposal_count=proposal_count,   # 1000
                              nms_threshold=config.RPN_NMS_THRESHOLD,  # 0.7
                              name="ROI",

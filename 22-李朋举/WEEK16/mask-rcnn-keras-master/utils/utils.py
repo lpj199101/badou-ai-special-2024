@@ -523,7 +523,8 @@ def compute_recall(pred_boxes, gt_boxes, iou):
     return recall, positive_ids
 
 
-# batch_slice 函数的作用是将批量数据分成多个切片，并对每个切片应用相同的计算图，最后将结果合并。这样可以在一次计算中处理多个数据样本，提高计算效率
+# batch_slice 函数的作用是将批量数据分成多个切片，并对每个切片应用相同的计算图(graph_fn: lambda x, y: tf.gather(x, y),为调用时传入的不同函数)，
+#             最后将结果合并成列表 ([(scores1, ix1,(scores2, ix2),...)]), 这样可以在一次计算中处理多个数据样本，提高计算效率
 def batch_slice(inputs, graph_fn, batch_size, names=None):
     """
     Splits inputs into slices and feeds each slice to a copy of the given computation graph and then combines the results.
@@ -537,7 +538,8 @@ def batch_slice(inputs, graph_fn, batch_size, names=None):
     """
     if not isinstance(inputs, list):  # 函数检查输入是否为列表，如果不是，则将其转换为列表
         inputs = [inputs]
-        # [scores, ix]  -> Tensor("ROI/strided_slice:0", shape=(?, ?), dtype=float32)、  Tensor("ROI/top_anchors:1", shape=(?, ?), dtype=int32)
+        # [scores, ix]  -> Tensor("ROI/strided_slice:0", shape=(?, ?), dtype=float32)、
+        #                  Tensor("ROI/top_anchors:1", shape=(?, ?), dtype=int32)
     outputs = []  # 创建一个空列表 outputs 用于存储每个切片的结果
     for i in range(batch_size):  # 循环
         '''

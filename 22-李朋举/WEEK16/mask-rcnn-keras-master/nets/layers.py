@@ -194,8 +194,7 @@ class ProposalLayer(Layer):  # 定义 ProposalLayer 的类，它继承自 Layer 
         综上所述，这段代码的作用是根据索引 `ix` 从锚框张量 `anchors` 中选择一部分锚框，并将结果存储在 `pre_nms_anchors` 张量中。这样可以在每个 GPU 上处理一部分锚框，以便进行后续的计算。
         '''
         pre_nms_anchors = utils.batch_slice([anchors, ix], lambda a, x: tf.gather(a, x), self.config.IMAGES_PER_GPU,
-                                            names=[
-                                                "pre_nms_anchors"])  # Tensor("ROI/pre_nms_anchors:0", shape=(1, ?, 4), dtype=float32)
+                                            names=["pre_nms_anchors"])  # Tensor("ROI/pre_nms_anchors:0", shape=(1, ?, 4), dtype=float32)
 
         # [batch, N, (y1, x1, y2, x2)]
         # 对先验框进行解码 (使用 utils.batch_slice 函数和 apply_box_deltas_graph 函数，对筛选出的框的先验框进行解码，得到最终的框的坐标，并将其存储在 boxes 变量中)
@@ -213,8 +212,7 @@ class ProposalLayer(Layer):  # 定义 ProposalLayer 的类，它继承自 Layer 
         总结起来，这段代码的目的是对锚框和偏移量进行切片操作，并通过应用 `apply_box_deltas_graph` 函数计算得到调整后的框的坐标。具体的计算过程和结果取决于 `apply_box_deltas_graph` 函数的实现。
         '''
         boxes = utils.batch_slice([pre_nms_anchors, deltas], lambda x, y: apply_box_deltas_graph(x, y),
-                                  self.config.IMAGES_PER_GPU, names=[
-                "refined_anchors"])  # Tensor("ROI/refined_anchors:0", shape=(1, ?, 4), dtype=float32)
+                                  self.config.IMAGES_PER_GPU, names=[ "refined_anchors"])  # Tensor("ROI/refined_anchors:0", shape=(1, ?, 4), dtype=float32)
 
         # [batch, N, (y1, x1, y2, x2)]
         # 防止超出图片范围 (使用 utils.batch_slice 函数和 clip_boxes_graph 函数，对解码后的框进行裁剪，以防止超出图片范围，并将其存储在 boxes 变量中)
@@ -243,6 +241,7 @@ class ProposalLayer(Layer):  # 定义 ProposalLayer 的类，它继承自 Layer 
                                                    self.proposal_count,
                                                    self.nms_threshold,
                                                    name="rpn_non_max_suppression")
+            # 合并
             proposals = tf.gather(boxes, indices)
             # 如果数量达不到设置的建议框数量的话
             # 就padding
@@ -299,8 +298,35 @@ def parse_image_meta_graph(meta):
 """
 定义 PyramidROIAlign 的类, 继承自 Layer 类
 PyramidROIAlign 类用于实现金字塔 ROI 对齐操作，将不同大小的建议框映射到相应的特征层上，并进行截取和调整大小的操作。
+
+    ROI 是 Region of Interest 的缩写，中文意思是“感兴趣区域”。在 Faster R-CNN 中，ROI 指的是图像中可能包含目标的区域, 这些区域通常是通过目标检测算法（如 Selective Search 、 Region Proposal Networks）或其他方法预先定义的。
+    Feature Map 是卷积神经网络中卷积层的输出结果，它表示输入图像在不同卷积核下的特征响应。Feature Map 可以看作是输入图像的一种抽象表示，其中包含了图像的各种特征信息。
+    ROI Pooling 是 Faster R-CNN 中的一个关键操作，将不同大小的 感兴趣区(ROI) 映射到 固定大小的特征图(Feature Map)上:                                                     
+                1. **ROI 提取**：首先，需要从输入图像中提取出感兴趣的区域。这些区域可以是通过目标检测算法（如 Faster R-CNN）检测到的目标框，也可以是其他方式定义的区域。
+                                    -. **目标检测算法**：使用目标检测算法（如 Faster R-CNN 本身或其他类似的算法）来检测输入图像中的目标。这些目标可以是各种物体、类别或感兴趣的区域。
+                                    -. **目标框生成**：目标检测算法会输出一系列目标框，每个目标框表示检测到的目标的位置和大小。这些目标框通常以矩形的形式表示，具有左上角坐标和宽度、高度等尺寸信息。
+                                    -. **ROI 提取**：根据目标框的位置和大小，从输入图像中提取出对应的感兴趣区域（ROI）。ROI 可以是目标框本身，也可以是根据需要进行一定的扩展或调整后的区域。
+                2. **ROI 映射**：接下来，将提取到的 ROI 映射到特征图上。特征图是卷积神经网络在处理图像时生成的中间表示，它包含了图像的各种特征信息。
+                                    -. 确定 ROI 的位置和大小：首先，需要确定提取到的 ROI 在输入图像中的位置和大小。
+                                    -. 找到对应的特征图位置：根据 ROI 的位置和大小，在特征图中找到与之对应的位置。
+                                    -. 映射 ROI 到特征图：将 ROI 中的像素值映射到特征图中对应的位置上。
+                                    ROI Pooling 的目的是将不同大小的 ROI 转换为固定大小的特征表示，以便后续的处理和分类。通过池化操作，可以提取 ROI 中的主要特征，并减少尺寸差异对模型训练和推理的影响。
+                                                将 ROI 划分为一个固定数量的子区域, 并对每个子区域进行最大池化操作, 得到固定大小的特征向量,
+                                                    - 将输入的 ROI 区域划分为固定数量的子 区域,子区域的数量：通常根据具体的实现和需求来确定，常见的数量有 7x7 或 14x14 等
+                                                    - 对每个子区域进行池化操作，通常采用最大池化
+                                                    - 将池化后的结果组合成一个固定大小的特征向量, 一个固定的尺寸，通常与后续的全连接层或分类器的输入维度相匹配
+                                                这个特征向量可以看作是 ROI 在特征图上的表示，它包含了 ROI 的各种特征信息。
+                3. **特征图调整**：由于 ROI 的大小可能与特征图的大小不匹配，因此需要对特征图进行调整，使其能够与 ROI 进行对应。这可以通过插值、池化等操作来实现。                        
+                                    - 可能的操作包括特征图的裁剪、缩放、填充等，以使其与特定的需求或后续处理步骤相匹配。
+                4. **固定大小的特征图**：经过调整后，得到了一个与 ROI 大小相对应的固定大小的特征图。这个特征图可以作为后续处理的输入，例如用于目标分类、语义分割等任务。
+                                      特征图输入到后续网络层
+                                        - 将第 3 步得到的特征图作为输入，传递给后续的网络层。
+                                        - 这些网络层可能包括全连接层、卷积层、分类器等，用于进行目标分类、边界框回归、掩码生成等任务。               
+    通过 ROI Pooling，Faster R-CNN 可以处理不同大小的目标，并生成固定大小的特征图，以便后续的分类和回归任务。
+    在得到特征向量后，通常会将其输入到全连接层或其他分类器中，进行目标的分类和回归。全连接层会将特征向量中的每个元素都连接到输出层的神经元上，从而实现对目标的分类和回归。          
 """
 class PyramidROIAlign(Layer):
+
     # 初始化类的实例
     def __init__(self, pool_shape, **kwargs):
         super(PyramidROIAlign, self).__init__(**kwargs)
@@ -309,11 +335,11 @@ class PyramidROIAlign(Layer):
     # 执行金字塔 ROI 对齐操作
     def call(self, inputs):
         """
-            [<tf.Tensor 'ROI/packed_2:0' shape=(1, ?, 4) dtype=float32>, 
-             <tf.Tensor 'input_image_meta:0' shape=(?, 93) dtype=float32>, 
-             <tf.Tensor 'fpn_p2/BiasAdd:0' shape=(?, ?, ?, 256) dtype=float32>, 
+            [<tf.Tensor 'ROI/packed_2:0' shape=(1, ?, 4) dtype=float32>,
+             <tf.Tensor 'input_image_meta:0' shape=(?, 93) dtype=float32>,
+             <tf.Tensor 'fpn_p2/BiasAdd:0' shape=(?, ?, ?, 256) dtype=float32>,
              <tf.Tensor 'fpn_p3/BiasAdd:0' shape=(?, ?, ?, 256) dtype=float32>,
-             <tf.Tensor 'fpn_p4/BiasAdd:0' shape=(?, ?, ?, 256) dtype=float32>, 
+             <tf.Tensor 'fpn_p4/BiasAdd:0' shape=(?, ?, ?, 256) dtype=float32>,
              <tf.Tensor 'fpn_p5/BiasAdd:0' shape=(?, ?, ?, 256) dtype=float32>]
         """
         # 1. 接收输入的参数 inputs，并将其分解为三个部分：boxes（建议框的位置）、image_meta（包含图片信息）和 feature_maps（所有的特征层）
@@ -323,32 +349,37 @@ class PyramidROIAlign(Layer):
         image_meta = inputs[1]  # Tensor("input_image_meta:0", shape=(?, 93), dtype=float32)
         # 取出所有的特征层[batch, height, width, channels]
         feature_maps = inputs[2:]
-
-        # 通过 tf.split 函数将 boxes 按照维度 2 拆分成四个部分，分别赋值给变量 y1、x1、y2 和 x2。然后计算建议框的高度 h 和宽度 w
+        # 通过 tf.split 函数将 boxes 按照维度 2(第3个维度) 拆分成四个部分，分别赋值给变量 y1、x1、y2 和 x2。然后计算建议框的高度 h 和宽度 w
         y1, x1, y2, x2 = tf.split(boxes, 4, axis=2)
         h = y2 - y1
         w = x2 - x1
-
         # 获得输入进来的图像的大小
         # image_meta: Tensor("input_image_meta:0", shape=(?, 93), dtype=float32)  1+3+3+4+1+self.NUM_CLASSES(81)
-        image_shape = parse_image_meta_graph(image_meta)['image_shape'][
-            0]  # Tensor("roi_align_classifier/strided_slice_6:0", shape=(3,), dtype=float32)
+        # Tensor("roi_align_classifier/strided_slice_6:0", shape=(3,), dtype=float32)
+        image_shape = parse_image_meta_graph(image_meta)['image_shape'][0]
 
         # 2. 通过建议框的大小找到这个建议框属于哪个特征层
         '''
-        tf.sqrt() 是 TensorFlow 中的一个函数，用于计算张量的平方根。它接受一个张量作为输入，并返回一个与输入张量形状相同的张量，其中每个元素都是输入张量对应元素的平方根。
+        tf.cast() 用于将张量的数据类型转换为指定的数据类型
+        tf.minimum() 用于计算两个张量的元素级最小值, 返回一个新的张量，其元素值是两个输入张量对应位置元素的最小值
+           例： 创建两个张量 tensor1 = tf.constant([1, 2, 3]) tensor2 = tf.constant([4, 5, 6])
+                          result = tf.minimum(tensor1, tensor2) -> [1, 2, 3] 
+        tf.maximum() 用于计算两个张量的元素级最大值, 其元素值是两个输入张量对应位置元素的最大值
+        tf.sqrt() 用于计算张量的平方根。它接受一个张量作为输入，并返回一个与输入张量形状相同的张量，其中每个元素都是输入张量对应元素的平方根。
            例： tensor = tf.constant([4, 9, 16]) -> tf.sqrt(tensor) = [2. 3.  4. ]
-        计算建议框的面积 image_area，
-        然后通过计算平方根和比例的对数，找到建议框所属的特征层 roi_level。 
-        最后，通过 tf.minimum 和 tf.maximum 函数对 roi_level 进行限制，确保其在有效范围内。
+        tf.squeeze() 用于删除张量中维度为 2 的维度, 即第3维度。如果原始张量中没有维度为2的维度，则 tf.squeeze() 函数不会执行任何操作
         '''
-        image_area = tf.cast(image_shape[0] * image_shape[1],
-                             tf.float32)  # Tensor("roi_align_classifier/mul:0", shape=(), dtype=float32)
-        roi_level = log2_graph(tf.sqrt(h * w) / (224.0 / tf.sqrt(
-            image_area)))  # Tensor("roi_align_classifier/truediv_3:0", shape=(1, ?, 1), dtype=float32)
+        # 计算建议框的面积 image_area  Tensor("roi_align_classifier/mul:0", shape=(), dtype=float32)
+        image_area = tf.cast(image_shape[0] * image_shape[1], tf.float32)
+        # [建议框所属的特征层的级别]
+        # 通过计算建议框的平方根与图像面积的平方根的比值，并取对数，得到建议框所属的特征层的级别。
+        # Tensor("roi_align_classifier/truediv_3:0", shape=(1, ?, 1), dtype=float32)
+        roi_level = log2_graph(tf.sqrt(h * w) / (224.0 / tf.sqrt(image_area)))
+        # 通过 tf.minimum 和 tf.maximum 函数对 roi_level 进行限制，确保其在有效范围内, 将 roi_level 限制在 2 到 5 之间
         roi_level = tf.minimum(5, tf.maximum(2, 4 + tf.cast(tf.round(roi_level), tf.int32)))
-        # batch_size, box_num
-        roi_level = tf.squeeze(roi_level, 2)  # Tensor("roi_align_classifier/Squeeze:0", shape=(1, ?), dtype=int32)
+        # 压缩 roi_level 的维度：使用 tf.squeeze 函数将 roi_level 的维度从 (1,?, 1) 压缩为 (1,?)
+        # roi_level 张量的形状将变为 (batch_size, num_boxes) Tensor("roi_align_classifier/Squeeze:0", shape=(1, ?), dtype=int32)
+        roi_level = tf.squeeze(roi_level, 2)
 
         # Loop through levels and apply ROI pooling to each. P2 to P5.
         '''
@@ -357,34 +388,53 @@ class PyramidROIAlign(Layer):
         pooled = []
         box_to_level = []
         # 分别在P2-P5中进行截取
+        '''
+        `enumerate()` 是 Python 内置的一个函数，用于将一个可迭代对象转换为包含索引和元素的元组序列。
+                my_list = ['apple', 'banana', 'cherry']
+                # 使用 enumerate() 函数
+                for index, element in enumerate(my_list):
+                    print(f'索引 {index}: {element}')
+            在上述示例中，`enumerate(my_list)` 会返回一个迭代器，该迭代器会生成一系列的元组，其中每个元组的第一个元素是索引，第二个元素是对应的元素。
+            通过使用 `for` 循环遍历这个迭代器，我们可以方便地获取每个元素的索引和值，并进行相应的处理。
+        `enumerate()` 函数常用于需要同时访问元素和其索引的情况，例如在遍历列表、字符串、元组等可迭代对象时。
+        '''
         for i, level in enumerate(range(2, 6)):
-            # 找到每个特征层对应box
+
+            # 找到每个特征层对应box  Tensor("roi_align_classifier/Where:0", shape=(?, 2), dtype=int64)  2-满足条件的行索引、列索引
             '''
+            ix 是一个张量，它表示在 roi_level 张量中 等于 给定特征层 level(P2) 的元素的索引
             使用 TensorFlow 的 `tf.where()` 函数来查找满足条件的元素索引:
-                具体来说，`tf.equal(roi_level, level)` 会返回一个布尔类型的张量，其中 `True` 表示 `roi_level` 和 `level` 相等的位置，`False` 表示不相等的位置。
+                具体来说，将 roi_level 张量中的每个元素与给定的特征层级别 level(P2) 进行比较
+                        返回一个布尔类型的张量，其中 `True` 表示 `roi_level` 和 `level` 相等的位置，`False` 表示不相等的位置。
                 然后，`tf.where()` 函数会返回一个元组，其中第一个元素是满足条件的行索引，第二个元素是满足条件的列索引。
             在这个例子中，`ix` 将会是一个张量，其中包含了满足条件的元素的索引。
             '''
-            ix = tf.where(tf.equal(roi_level, level))
+            ix = tf.where(tf.equal(roi_level, level))  # level -> 2
             '''
+            [level_boxes-给定特征层(P2)相关的建议框]   Tensor("roi_align_classifier/GatherNd:0", shape=(?, 4), dtype=float32)
+            执行 tf.gather_nd(boxes, ix) 后，将返回一个新的张量 level_boxes，其中包含了根据索引 ix 从 boxes 中选取的子张量, 这些子张量对应于与给定特征层相关的建议框。
             使用 TensorFlow 的 `gather_nd` 函数从 `boxes` 张量中根据索引 `ix` 选取子张量:                
                 - `tf.gather_nd` 函数：这是 TensorFlow 提供的一个函数，用于根据多维索引从输入张量中选取子张量。
                 - `boxes`：这是一个张量，可能表示一个多维数组或张量。
                 - `ix`：这是一个索引张量，它指定了要从 `boxes` 中选取的子张量的位置。
             通过执行 `tf.gather_nd(boxes, ix)`，代码将根据索引 `ix` 从 `boxes` 中选取相应位置的子张量，并将结果存储在 `level_boxes` 变量中。                
             '''
-            level_boxes = tf.gather_nd(boxes, ix)
-            box_to_level.append(ix)
+            level_boxes = tf.gather_nd(boxes, ix)  # Tensor("roi_align_classifier/GatherNd:0", shape=(?, 4), dtype=float32)
+            '''
+            [box_to_level - 给定特征层 level(P2) 的元素的索引]
+            '''
+            box_to_level.append(ix)  # {list:1} [<tf.Tensor 'roi_align_classifier/Where:0' shape=(?, 2) dtype=int64>]
 
             # 获得这些box所属的图片
             '''
+            [box_indices - 每个元素表示对应的框所属的图片索引]
             将张量 `ix` 的第一列转换为 `tf.int32` 类型，并将结果存储在变量 `box_indices` 中。                
                 - `ix` 是一个张量，它的第一列表示每个框所属的图片索引。
                 - `tf.cast(ix[:, 0], tf.int32)` 使用 TensorFlow 的 `cast` 函数将 `ix` 的第一列转换为 `tf.int32` 类型。
                 - `box_indices` 是转换后的结果，它是一个整数类型的张量，每个元素表示对应的框所属的图片索引。
-            通过将 `ix` 的第一列转换为整数类型，我们可以方便地根据图片索引对框进行操作或处理。                
+            通过将 `ix` 的第一列转换为整数类型，可以方便地根据图片索引对框进行操作或处理。                
             '''
-            box_indices = tf.cast(ix[:, 0], tf.int32)
+            box_indices = tf.cast(ix[:, 0], tf.int32)  # Tensor("roi_align_classifier/Cast_1:0", shape=(?,), dtype=int32)
 
             # 停止梯度下降
             '''
@@ -410,45 +460,107 @@ class PyramidROIAlign(Layer):
             返回的结果是一个与裁剪框数量相同的张量，每个张量表示一个裁剪和调整大小后的图像。
                         
             对特征图进行裁剪和调整大小的操作，并将结果添加到 `pooled` 列表中。                
-                - `feature_maps[i]` 是第 `i` 个特征图。
+                - `feature_maps[i]` 是(P2-P5中的) 第 `i` 个特征图。
                 - `level_boxes` 是对应特征层的建议框。
                 - `box_indices` 是建议框在特征图中的索引。
                 - `self.pool_shape` 是池化操作的形状。
                 - `method="bilinear"` 指定了使用双线性插值的方法进行调整大小。
                 通过 `tf.image.crop_and_resize()` 函数，根据建议框的位置和索引，从特征图中裁剪出相应的区域，并将其调整大小到指定的池化形状。
                 最后，将调整大小后的结果添加到 `pooled` 列表中。
-            这样，在循环结束后，`pooled` 列表将包含所有特征层的裁剪和调整大小后的结果。                
+            这样，在循环结束后，`pooled` 列表将包含所有特征层的裁剪和调整大小后的结果。       
+            pooled ->  {list:4} Tensor("roi_align_classifier/CropAndResize:0", shape=(?, 7, 7, 256), dtype=float32) ...         
             '''
             pooled.append(tf.image.crop_and_resize(feature_maps[i], level_boxes, box_indices, self.pool_shape, method="bilinear"))
-
         '''
+        
         4. 将 pooled 列表中的结果进行拼接，并根据建议框的顺序进行排序，将同一张图里的建议框聚集在一起。
            然后，根据排序后的索引获取图片的索引，并从 pooled 中选择相应的部分。
            最后，将结果重新调整为原始的格式，返回最终的输出。
         '''
-        pooled = tf.concat(pooled, axis=0)
+        '''
+        将 `pooled` 列表中的所有张量沿着指定的轴（在这里是 `axis=0`）进行拼接:
+            `pooled` 列表中包含了多个裁剪和调整大小后的特征图，通过将它们沿着 `axis=0` 进行拼接，可以得到一个形状为 `[batch * num_boxes, pool_height, pool_width, channels]` 的张量。
+        这样的拼接操作在深度学习中常用于 将多个样本或多个特征图组合在一起 ,以便进行后续的处理或计算。
+        '''
+        pooled = tf.concat(pooled, axis=0)  # Tensor("roi_align_classifier/concat:0", shape=(?, 7, 7, 256), dtype=float32)
+
         # 将顺序和所属的图片进行堆叠
         # 将 box_to_level 进行堆叠和扩展，然后根据索引进行排序，将同一张图里的建议框聚集在一起。最后，根据排序后的索引获取图片的索引，并从 pooled 中选择相应的部分
-        box_to_level = tf.concat(box_to_level, axis=0)
-        box_range = tf.expand_dims(tf.range(tf.shape(box_to_level)[0]), 1)
-        box_to_level = tf.concat([tf.cast(box_to_level, tf.int32), box_range], axis=1)
+        '''
+        [box_to_level - 所有建议框的索引信息]   box_to_level 张量的形状为 [N, M]，其中 N 表示建议框的数量，M 表示每个建议框的索引信息
+        所有建议框的索引信息: 将 box_to_level 列表中的所有张量沿着指定的轴（在这里是 axis=0）进行拼接
+        具体来说，box_to_level 列表中可能包含了多个与建议框对应的索引张量。通过使用 tf.concat() 函数将这些张量拼接在一起，可以得到一个更大的张量，其中包含了所有建议框的索引信息。
+        '''
+        box_to_level = tf.concat(box_to_level, axis=0)  # Tensor("roi_align_classifier/concat_1:0", shape=(?, 2), dtype=int64)
+        ''' 
+         box_range -> 新的张量 `box_range`，其形状为 `[N, 1]`
+        `box_range` 是通过在 `box_to_level` 张量的第一维上扩展一个维度得到的张量:
+            `box_to_level` 张量的形状为 `[N, M]`，其中 `N` 表示建议框的数量，`M` 表示每个建议框的索引信息。   
+            tf.range(tf.shape(box_to_level)[0])` 创建了一个从 0 到 `tf.shape(box_to_level)[0] - 1` 的整数序列张量。
+            然后，`tf.expand_dims()` 函数将这个序列张量的第一维扩展为 1，得到一个形状为 [tf.shape(box_to_level)[0], 1] 的张量 box_range。         
+            通过执行 `tf.expand_dims(tf.range(tf.shape(box_to_level)[0]), 1)`，创建了一个新的张量 `box_range`，其形状为 `[N, 1]`。           
+            在这个张量中，每一行都包含一个从 0 到 `N-1` 的整数序列,`box_range` 的作用通常是为了在后续的计算中，与其他张量进行组合或对齐，以便对建议框进行更复杂的操作。                                  
+        '''
+        box_range = tf.expand_dims(tf.range(tf.shape(box_to_level)[0]), 1)  # Tensor("roi_align_classifier/ExpandDims:0", shape=(?, 1), dtype=int32)
+        '''
+        [box_to_level -> 每个建议框的唯一标识符或索引]
+        将 `box_to_level` 和 `box_range` 这两个张量沿着第二个维度（`axis=1`）进行连接:
+            首先，`tf.cast(box_to_level, tf.int32)` 将 `box_to_level` 张量的数据类型转换为整数类型 `tf.int32`。
+            然后，通过 `tf.concat()` 函数将转换后的 `box_to_level` 和 `box_range` 张量连接在一起。连接后的结果将是一个新的张量，其维度与连接前的两个张量的维度之和相同。
+            将 `box_range` 与 `box_to_level` 张量进行连接，以获取每个建议框的唯一标识符或索引。      
+        '''
+        box_to_level = tf.concat([tf.cast(box_to_level, tf.int32), box_range], axis=1)  # Tensor("roi_align_classifier/concat_2:0", shape=(?, 3), dtype=int32)
+        '''
+        创建了一个排序张量 `sorting_tensor`，它是通过将 `box_to_level` 张量的第一列和第二列的值相乘，并将结果相加得到的:
+            box_to_level[:, 0]` 表示 `box_to_level` 张量的第一列，`表示第几张图, 即 建议框所属的图像索引
+            box_to_level[:, 1]` 表示 `box_to_level` 张量的第二列， 表示表示第几张图里的第几个框， 即 建议框在图像中的索引
 
-        # box_to_level[:, 0]表示第几张图
-        # box_to_level[:, 1]表示第几张图里的第几个框
-        sorting_tensor = box_to_level[:, 0] * 100000 + box_to_level[:, 1]
+            代码 `sorting_tensor = box_to_level[:, 0] * 100000 + box_to_level[:, 1]` 中，乘以 `100000` 的目的是为了增加第一列的值的权重，以便在排序时更强调第一列的差异 
+                通过乘以一个较大的数，可以使第一列的值在排序中占据更大的比重，从而对排序结果产生更大的影响。这样做可以根据具体的需求来调整排序的优先级。
+                                    即使图像索引的差异在排序中更加突出，从而首先按照图像索引进行排序，然后在每个图像内部按照建议框的索引进行排序。
+                通过将这两列的值相乘，并将结果相加，得到了一个新的张量 `sorting_tensor`。这个张量的值将用于对 `box_to_level` 张量进行排序。
+            在后续的代码中，通常会使用 `sorting_tensor` 来对 `box_to_level` 张量进行排序，以便按照以上特定的顺序处理建议框。
+        '''
+        sorting_tensor = box_to_level[:, 0] * 100000 + box_to_level[:, 1]  # Tensor("roi_align_classifier/add_1:0", shape=(?,), dtype=int32)
         # 进行排序，将同一张图里的某一些聚集在一起
-        ix = tf.nn.top_k(sorting_tensor, k=tf.shape(box_to_level)[0]).indices[::-1]
+        '''
+        `tf.nn.top_k()` 函数来获取排序张量 `sorting_tensor` 中前 `k` 个最大值的索引:
+            返回一个包含两个元素的元组, 第一个元素是值张量，其中包含了排序张量中的前 `k` 个最大值。第二个元素是索引张量，其中包含了这些最大值在原始排序张量中的索引。
+                    
+            `k` 的值被设置为 `tf.shape(box_to_level)[0]`，这意味着将返回排序张量中所有值的索引。
+            indices[::-1] 是 Python 中的切片操作，用于反转索引张量 indices 的顺序，这样就得到了按照降序排列的索引
+                   切片操作可以通过指定起始索引、结束索引和步长来提取张量或列表的一部分。[::-1] 表示从末尾开始，以步长为-1 的方式提取整个张量或列表。
+        '''
+        ix = tf.nn.top_k(sorting_tensor, k=tf.shape(box_to_level)[0]).indices[::-1]  # Tensor("roi_align_classifier/strided_slice_17:0", shape=(?,), dtype=int32)
 
         # 按顺序获得图片的索引
-        ix = tf.gather(box_to_level[:, 2], ix)
-        pooled = tf.gather(pooled, ix)
+        '''
+        box_to_level 是一个张量，它的形状为 [N, 3]，其中 N 表示建议框的数量，3 表示每个建议框的索引信息。
+        box_to_level[:, 2] 表示取 box_to_level 张量的第三列，即每个建议框在特征图中的索引。 ？ 数量 
+        根据索引 `ix` 从 `box_to_level` 张量的第三列中选择相应的元素:
+            `tf.gather()` 函数的作用是根据提供的索引从输入张量中选择特定位置的元素。
+                         `box_to_level[:, 2]` 表示 `box_to_level` 张量的第三列，`ix` 是一个索引张量，它指定了要选择的元素的位置。
+            这样做的目的可能是为了根据前面计算得到的索引 `ix`，从 `box_to_level` 张量中选择与排序后的建议框对应的图片索引。            
+        '''
+        ix = tf.gather(box_to_level[:, 2], ix)  # Tensor("roi_align_classifier/GatherV2:0", shape=(?,), dtype=int32)
+        '''
+        使用 TensorFlow 的 `tf.gather()` 函数根据索引 `ix` 从 `pooled` 张量中选择相应的元素: 
+            `tf.gather()` 函数的作用是根据提供的索引从输入张量中选择特定位置的元素。 根据前面计算得到的索引 `ix`，从 `pooled` 张量中选择与排序后的建议框对应的部分。            
+        '''
+        pooled = tf.gather(pooled, ix)  # Tensor("roi_align_classifier/GatherV2_1:0", shape=(?, 7, 7, 256), dtype=float32)
 
         # 重新reshape为原来的格式
         # 也就是 将截取和调整大小后的结果重新调整为原始的格式，返回最终的输出
         # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
-        shape = tf.concat([tf.shape(boxes)[:2], tf.shape(pooled)[1:]], axis=0)
-        pooled = tf.reshape(pooled, shape)
-        return pooled
+        '''
+        将 `boxes` 张量的前两维形状和 `pooled` 张量的后三维形状连接在一起，得到一个新的形状张量 `shape`:
+            具体来说，`tf.shape(boxes)[:2]` 表示 `boxes` 张量的前两维形状，即批量大小和建议框的数量。
+                     `tf.shape(pooled)[1:]` 表示 `pooled` 张量的后三维形状，即池化后的高度、宽度和通道数。
+            通过使用 `tf.concat()` 函数将这两个形状张量连接在一起，得到一个新的形状张量 `shape`，其中包含了批量大小、建议框的数量、池化后的高度、宽度和通道数。
+        '''
+        shape = tf.concat([tf.shape(boxes)[:2], tf.shape(pooled)[1:]], axis=0)  # Tensor("roi_align_classifier/concat_3:0", shape=(5,), dtype=int32)
+        pooled = tf.reshape(pooled, shape)  #  pooled -> Tensor("roi_align_classifier/Reshape:0", shape=(1, ?, 7, 7, 256), dtype=float32)
+        return pooled  # Tensor("roi_align_classifier/Reshape:0", shape=(1, ?, 7, 7, 256), dtype=float32)
 
     def compute_output_shape(self, input_shape):
         return input_shape[0][:2] + self.pool_shape + (input_shape[2][-1],)
