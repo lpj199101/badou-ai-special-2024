@@ -342,7 +342,7 @@ class PyramidROIAlign(Layer):
              <tf.Tensor 'fpn_p4/BiasAdd:0' shape=(?, ?, ?, 256) dtype=float32>,
              <tf.Tensor 'fpn_p5/BiasAdd:0' shape=(?, ?, ?, 256) dtype=float32>]
         """
-        # 1. 接收输入的参数 inputs，并将其分解为三个部分：boxes（建议框的位置）、image_meta（包含图片信息）和 feature_maps（所有的特征层）
+        # # # 1. 接收输入的参数 inputs，并将其分解为三个部分：boxes（建议框的位置）、image_meta（包含图片信息）和 feature_maps（所有的特征层）
         # 建议框的位置
         boxes = inputs[0]  # Tensor("ROI/packed_2:0", shape=(1, ?, 4), dtype=float32)
         # image_meta包含了一些必要的图片信息
@@ -358,7 +358,7 @@ class PyramidROIAlign(Layer):
         # Tensor("roi_align_classifier/strided_slice_6:0", shape=(3,), dtype=float32)
         image_shape = parse_image_meta_graph(image_meta)['image_shape'][0]
 
-        # 2. 通过建议框的大小找到这个建议框属于哪个特征层
+        # # # # 2. 通过建议框的大小找到这个建议框属于哪个特征层
         '''
         tf.cast() 用于将张量的数据类型转换为指定的数据类型
         tf.minimum() 用于计算两个张量的元素级最小值, 返回一个新的张量，其元素值是两个输入张量对应位置元素的最小值
@@ -381,10 +381,8 @@ class PyramidROIAlign(Layer):
         # roi_level 张量的形状将变为 (batch_size, num_boxes) Tensor("roi_align_classifier/Squeeze:0", shape=(1, ?), dtype=int32)
         roi_level = tf.squeeze(roi_level, 2)
 
+        # # # 3. 通过循环遍历特征层，对于每个特征层，找到对应的建议框，并使用 tf.image.crop_and_resize 函数进行截取和调整大小。将截取后的结果添加到列表 pooled 中
         # Loop through levels and apply ROI pooling to each. P2 to P5.
-        '''
-        3. 通过循环遍历特征层，对于每个特征层，找到对应的建议框，并使用 tf.image.crop_and_resize 函数进行截取和调整大小。将截取后的结果添加到列表 pooled 中
-        '''
         pooled = []
         box_to_level = []
         # 分别在P2-P5中进行截取
@@ -412,18 +410,27 @@ class PyramidROIAlign(Layer):
             ix = tf.where(tf.equal(roi_level, level))  # level -> 2
             '''
             [level_boxes-给定特征层(P2)相关的建议框]   Tensor("roi_align_classifier/GatherNd:0", shape=(?, 4), dtype=float32)
+            tf.gather() 和 tf.gather_nd() 都是 TensorFlow 中的函数，用于从张量中收集元素。
+            tf.gather() 函数用于根据给定的索引从张量中收集元素。它接受一个张量 params 和一个索引张量 indices，并返回一个新的张量，其中包含根据索引从 params 中收集的元素。
+                        params = tf.constant([[1, 2, 3], [4, 5, 6], [7, 8, 9]])  
+                        indices = tf.constant([0,2])
+                        gathered = tf.gather_nd(params, indices)  -> [[1 2 3][7 8 9]]
+            tf.gather_nd() 函数根据给定的多维索引从输入张量中收集元素。索引是一个多维张量，其中每一行表示一个元素的索引。其中包含根据索引从 params 中收集的元素。
+                        params = tf.constant([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+                        indices = tf.constant([[0, 0], [1, 2]])
+                        gathered = tf.gather_nd(params, indices)  -> [1 6]
+                        
             执行 tf.gather_nd(boxes, ix) 后，将返回一个新的张量 level_boxes，其中包含了根据索引 ix 从 boxes 中选取的子张量, 这些子张量对应于与给定特征层相关的建议框。
             使用 TensorFlow 的 `gather_nd` 函数从 `boxes` 张量中根据索引 `ix` 选取子张量:                
-                - `tf.gather_nd` 函数：这是 TensorFlow 提供的一个函数，用于根据多维索引从输入张量中选取子张量。
                 - `boxes`：这是一个张量，可能表示一个多维数组或张量。
                 - `ix`：这是一个索引张量，它指定了要从 `boxes` 中选取的子张量的位置。
             通过执行 `tf.gather_nd(boxes, ix)`，代码将根据索引 `ix` 从 `boxes` 中选取相应位置的子张量，并将结果存储在 `level_boxes` 变量中。                
             '''
             level_boxes = tf.gather_nd(boxes, ix)  # Tensor("roi_align_classifier/GatherNd:0", shape=(?, 4), dtype=float32)
             '''
-            [box_to_level - 给定特征层 level(P2) 的元素的索引]
+            [box_to_level - 给定特征层 level(P2) 的元素的索引]    [N, M]，其中 N 表示建议框的数量，M 表示每个建议框的索引信息
             '''
-            box_to_level.append(ix)  # {list:1} [<tf.Tensor 'roi_align_classifier/Where:0' shape=(?, 2) dtype=int64>]
+            box_to_level.append(ix)  # {list:1} [<tf.Tensor 'roi_align_classifier/Where:0' shape=(?, 2) dtype=int64>] 2-满足条件的 ()
 
             # 获得这些box所属的图片
             '''
@@ -471,12 +478,8 @@ class PyramidROIAlign(Layer):
             pooled ->  {list:4} Tensor("roi_align_classifier/CropAndResize:0", shape=(?, 7, 7, 256), dtype=float32) ...         
             '''
             pooled.append(tf.image.crop_and_resize(feature_maps[i], level_boxes, box_indices, self.pool_shape, method="bilinear"))
-        '''
-        
-        4. 将 pooled 列表中的结果进行拼接，并根据建议框的顺序进行排序，将同一张图里的建议框聚集在一起。
-           然后，根据排序后的索引获取图片的索引，并从 pooled 中选择相应的部分。
-           最后，将结果重新调整为原始的格式，返回最终的输出。
-        '''
+
+        # # # 4. 将 pooled 列表中的结果进行拼接，并根据建议框的顺序进行排序，将同一张图里的建议框聚集在一起。
         '''
         将 `pooled` 列表中的所有张量沿着指定的轴（在这里是 `axis=0`）进行拼接:
             `pooled` 列表中包含了多个裁剪和调整大小后的特征图，通过将它们沿着 `axis=0` 进行拼接，可以得到一个形状为 `[batch * num_boxes, pool_height, pool_width, channels]` 的张量。
@@ -484,16 +487,17 @@ class PyramidROIAlign(Layer):
         '''
         pooled = tf.concat(pooled, axis=0)  # Tensor("roi_align_classifier/concat:0", shape=(?, 7, 7, 256), dtype=float32)
 
-        # 将顺序和所属的图片进行堆叠
+        # # 将顺序和所属的图片进行堆叠
         # 将 box_to_level 进行堆叠和扩展，然后根据索引进行排序，将同一张图里的建议框聚集在一起。最后，根据排序后的索引获取图片的索引，并从 pooled 中选择相应的部分
         '''
-        [box_to_level - 所有建议框的索引信息]   box_to_level 张量的形状为 [N, M]，其中 N 表示建议框的数量，M 表示每个建议框的索引信息
+        [box_to_level - 所有建议框的索引信息]concat_1
         所有建议框的索引信息: 将 box_to_level 列表中的所有张量沿着指定的轴（在这里是 axis=0）进行拼接
         具体来说，box_to_level 列表中可能包含了多个与建议框对应的索引张量。通过使用 tf.concat() 函数将这些张量拼接在一起，可以得到一个更大的张量，其中包含了所有建议框的索引信息。
         '''
-        box_to_level = tf.concat(box_to_level, axis=0)  # Tensor("roi_align_classifier/concat_1:0", shape=(?, 2), dtype=int64)
+        # Tensor("roi_align_classifier/:0", shape=(?, 2), dtype=int64)
+        box_to_level = tf.concat(box_to_level, axis=0)
         ''' 
-         box_range -> 新的张量 `box_range`，其形状为 `[N, 1]`
+         box_range -> 新的张量 `box_range`代表扩展之后的box to level的shape  其形状为 `[N, 1]` 
         `box_range` 是通过在 `box_to_level` 张量的第一维上扩展一个维度得到的张量:
             `box_to_level` 张量的形状为 `[N, M]`，其中 `N` 表示建议框的数量，`M` 表示每个建议框的索引信息。   
             tf.range(tf.shape(box_to_level)[0])` 创建了一个从 0 到 `tf.shape(box_to_level)[0] - 1` 的整数序列张量。
@@ -501,7 +505,8 @@ class PyramidROIAlign(Layer):
             通过执行 `tf.expand_dims(tf.range(tf.shape(box_to_level)[0]), 1)`，创建了一个新的张量 `box_range`，其形状为 `[N, 1]`。           
             在这个张量中，每一行都包含一个从 0 到 `N-1` 的整数序列,`box_range` 的作用通常是为了在后续的计算中，与其他张量进行组合或对齐，以便对建议框进行更复杂的操作。                                  
         '''
-        box_range = tf.expand_dims(tf.range(tf.shape(box_to_level)[0]), 1)  # Tensor("roi_align_classifier/ExpandDims:0", shape=(?, 1), dtype=int32)
+        # Tensor("roi_align_classifier/ExpandDims:0", shape=(?, 1), dtype=int32)
+        box_range = tf.expand_dims(tf.range(tf.shape(box_to_level)[0]), 1)
         '''
         [box_to_level -> 每个建议框的唯一标识符或索引]
         将 `box_to_level` 和 `box_range` 这两个张量沿着第二个维度（`axis=1`）进行连接:
@@ -509,7 +514,8 @@ class PyramidROIAlign(Layer):
             然后，通过 `tf.concat()` 函数将转换后的 `box_to_level` 和 `box_range` 张量连接在一起。连接后的结果将是一个新的张量，其维度与连接前的两个张量的维度之和相同。
             将 `box_range` 与 `box_to_level` 张量进行连接，以获取每个建议框的唯一标识符或索引。      
         '''
-        box_to_level = tf.concat([tf.cast(box_to_level, tf.int32), box_range], axis=1)  # Tensor("roi_align_classifier/concat_2:0", shape=(?, 3), dtype=int32)
+        # Tensor("roi_align_classifier/concat_2:0", shape=(?, 3), dtype=int32)
+        box_to_level = tf.concat([tf.cast(box_to_level, tf.int32), box_range], axis=1)
         '''
         创建了一个排序张量 `sorting_tensor`，它是通过将 `box_to_level` 张量的第一列和第二列的值相乘，并将结果相加得到的:
             box_to_level[:, 0]` 表示 `box_to_level` 张量的第一列，`表示第几张图, 即 建议框所属的图像索引
@@ -521,7 +527,8 @@ class PyramidROIAlign(Layer):
                 通过将这两列的值相乘，并将结果相加，得到了一个新的张量 `sorting_tensor`。这个张量的值将用于对 `box_to_level` 张量进行排序。
             在后续的代码中，通常会使用 `sorting_tensor` 来对 `box_to_level` 张量进行排序，以便按照以上特定的顺序处理建议框。
         '''
-        sorting_tensor = box_to_level[:, 0] * 100000 + box_to_level[:, 1]  # Tensor("roi_align_classifier/add_1:0", shape=(?,), dtype=int32)
+        # Tensor("roi_align_classifier/add_1:0", shape=(?,), dtype=int32)
+        sorting_tensor = box_to_level[:, 0] * 100000 + box_to_level[:, 1]
         # 进行排序，将同一张图里的某一些聚集在一起
         '''
         `tf.nn.top_k()` 函数来获取排序张量 `sorting_tensor` 中前 `k` 个最大值的索引:
@@ -531,26 +538,27 @@ class PyramidROIAlign(Layer):
             indices[::-1] 是 Python 中的切片操作，用于反转索引张量 indices 的顺序，这样就得到了按照降序排列的索引
                    切片操作可以通过指定起始索引、结束索引和步长来提取张量或列表的一部分。[::-1] 表示从末尾开始，以步长为-1 的方式提取整个张量或列表。
         '''
-        ix = tf.nn.top_k(sorting_tensor, k=tf.shape(box_to_level)[0]).indices[::-1]  # Tensor("roi_align_classifier/strided_slice_17:0", shape=(?,), dtype=int32)
-
+        # Tensor("roi_align_classifier/strided_slice_17:0", shape=(?,), dtype=int32)
+        ix = tf.nn.top_k(sorting_tensor, k=tf.shape(box_to_level)[0]).indices[::-1]
         # 按顺序获得图片的索引
         '''
         box_to_level 是一个张量，它的形状为 [N, 3]，其中 N 表示建议框的数量，3 表示每个建议框的索引信息。
-        box_to_level[:, 2] 表示取 box_to_level 张量的第三列，即每个建议框在特征图中的索引。 ？ 数量 
+        box_to_level[:, 2] 表示取 box_to_level 张量的第三列，即每个建议框在特征图中的索引。 (代表取出box to level的所有维度的shape)
         根据索引 `ix` 从 `box_to_level` 张量的第三列中选择相应的元素:
             `tf.gather()` 函数的作用是根据提供的索引从输入张量中选择特定位置的元素。
                          `box_to_level[:, 2]` 表示 `box_to_level` 张量的第三列，`ix` 是一个索引张量，它指定了要选择的元素的位置。
             这样做的目的可能是为了根据前面计算得到的索引 `ix`，从 `box_to_level` 张量中选择与排序后的建议框对应的图片索引。            
         '''
-        ix = tf.gather(box_to_level[:, 2], ix)  # Tensor("roi_align_classifier/GatherV2:0", shape=(?,), dtype=int32)
+        # Tensor("roi_align_classifier/GatherV2:0", shape=(?,), dtype=int32)
+        ix = tf.gather(box_to_level[:, 2], ix)
         '''
         使用 TensorFlow 的 `tf.gather()` 函数根据索引 `ix` 从 `pooled` 张量中选择相应的元素: 
             `tf.gather()` 函数的作用是根据提供的索引从输入张量中选择特定位置的元素。 根据前面计算得到的索引 `ix`，从 `pooled` 张量中选择与排序后的建议框对应的部分。            
         '''
-        pooled = tf.gather(pooled, ix)  # Tensor("roi_align_classifier/GatherV2_1:0", shape=(?, 7, 7, 256), dtype=float32)
+        # Tensor("roi_align_classifier/GatherV2_1:0", shape=(?, 7, 7, 256), dtype=float32)
+        pooled = tf.gather(pooled, ix)
 
-        # 重新reshape为原来的格式
-        # 也就是 将截取和调整大小后的结果重新调整为原始的格式，返回最终的输出
+        # # 重新reshape为原来的格式 将截取和调整大小后的结果重新调整为原始的格式，返回最终的输出
         # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
         '''
         将 `boxes` 张量的前两维形状和 `pooled` 张量的后三维形状连接在一起，得到一个新的形状张量 `shape`:
@@ -558,63 +566,159 @@ class PyramidROIAlign(Layer):
                      `tf.shape(pooled)[1:]` 表示 `pooled` 张量的后三维形状，即池化后的高度、宽度和通道数。
             通过使用 `tf.concat()` 函数将这两个形状张量连接在一起，得到一个新的形状张量 `shape`，其中包含了批量大小、建议框的数量、池化后的高度、宽度和通道数。
         '''
-        shape = tf.concat([tf.shape(boxes)[:2], tf.shape(pooled)[1:]], axis=0)  # Tensor("roi_align_classifier/concat_3:0", shape=(5,), dtype=int32)
-        pooled = tf.reshape(pooled, shape)  #  pooled -> Tensor("roi_align_classifier/Reshape:0", shape=(1, ?, 7, 7, 256), dtype=float32)
-        return pooled  # Tensor("roi_align_classifier/Reshape:0", shape=(1, ?, 7, 7, 256), dtype=float32)
+        # Tensor("roi_align_classifier/concat_3:0", shape=(5,), dtype=int32)
+        shape = tf.concat([tf.shape(boxes)[:2], tf.shape(pooled)[1:]], axis=0)
+        #  pooled -> Tensor("roi_align_classifier/Reshape:0", shape=(1, ?, 7, 7, 256), dtype=float32)
+        pooled = tf.reshape(pooled, shape)
+        # Tensor("roi_align_classifier/Reshape:0", shape=(1, ?, 7, 7, 256), dtype=float32)
+        #        [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
+        return pooled
 
     def compute_output_shape(self, input_shape):
         return input_shape[0][:2] + self.pool_shape + (input_shape[2][-1],)
 
 
-# ----------------------------------------------------------#
-#   Detection Layer
-#   
-# ----------------------------------------------------------#
-
+# --------------------------------------------------------------------------------------#
+#   Detection Layer  refine-精练
+#   对分类建议进行细化和过滤，去除重叠的部分，并返回最终的检测结果。检测结果包括建议框的坐标、类 ID 和得分
+# --------------------------------------------------------------------------------------#
 def refine_detections_graph(rois, probs, deltas, window, config):
     """细化分类建议并过滤重叠部分并返回最终结果探测。
     Inputs:
         rois: [N, (y1, x1, y2, x2)] in normalized coordinates
         probs: [N, num_classes]. Class probabilities.
-        deltas: [N, num_classes, (dy, dx, log(dh), log(dw))]. Class-specific
-                bounding box deltas.
-        window: (y1, x1, y2, x2) in normalized coordinates. The part of the image
-            that contains the image excluding the padding.
-
-    Returns detections shaped: [num_detections, (y1, x1, y2, x2, class_id, score)] where
-        coordinates are normalized.
+        deltas: [N, num_classes, (dy, dx, log(dh), log(dw))]. Class-specific bounding box deltas.
+        window: (y1, x1, y2, x2) in normalized coordinates. The part of the image that contains the image excluding the padding.
+    Returns detections shaped: [num_detections, (y1, x1, y2, x2, class_id, score)] where coordinates are normalized.
     """
+
     # 找到得分最高的类
-    class_ids = tf.argmax(probs, axis=1, output_type=tf.int32)
+    '''
+     找到每个建议框中得分最高的类的 ID:
+         `tf.argmax` 是 TensorFlow 中的一个函数，用于在张量中找到最大值的索引。
+            tf.argmax(input, axis=None, output_type=tf.int64, name=None)
+                - `input`：要进行操作的张量。
+                - `axis`：指定要在哪个轴上进行操作。如果不指定，则在整个张量中进行操作。
+                - `output_type`：指定输出的类型，默认为 `tf.int64`。
+                - `name`：操作的名称（可选）。
+        `tf.argmax` 函数返回一个张量，其中包含输入张量中最大值的索引。
+             input =  [[0, 1, 2], 
+                       [3, 4, 5]] , 
+            `tf.argmax(input, axis=0)` 将返回 `[1, 1, 1]`，表示在第一维上最大值的索引为 1。
+            `tf.argmax(input, axis=1)` 将返回 `[2, 2]`，表示在第二维上最大值的索引为 2。
+        如果需要获取最大值本身，可以使用 `tf.reduce_max` 函数。
+    '''
+    class_ids = tf.argmax(probs, axis=1, output_type=tf.int32)  # Tensor("mrcnn_detection/ArgMax:0", shape=(1000,), dtype=int32)
+
     # 序号+类
-    indices = tf.stack([tf.range(probs.shape[0]), class_ids], axis=1)
+    '''
+    将建议框的索引和对应的类 ID 组合成一个索引张量:
+        - `tf.range(probs.shape[0])` 生成一个从 0 到 `probs.shape[0] - 1` 的整数序列张量。
+        - `class_ids` 是一个表示每个建议框所属类别的张量。
+        - `tf.stack([tf.range(probs.shape[0]), class_ids], axis=1)` 将这两个张量沿着新的维度（第二维，`axis=1`）进行堆叠。
+                    将 `tf.range(probs.shape[0])` 和 `class_ids` 看作是一行一行的元素，然后将它们堆叠在一起形成一个新的张量。
+        最终得到的 `indices` 张量的形状为 `(probs.shape[0], 2)`，其中第一列是建议框的索引，第二列是对应的类 ID。        
+    '''
+    indices = tf.stack([tf.range(probs.shape[0]), class_ids], axis=1)  # Tensor("mrcnn_detection/stack:0", shape=(1000, 2), dtype=int32)
+
     # 取出成绩
-    class_scores = tf.gather_nd(probs, indices)
+    '''
+     根据索引张量取出每个建议框中对应类的得分:
+        使用 TensorFlow 的 `tf.gather_nd()` 函数根据索引 `indices` 从概率张量 `probs` 中收集对应的类得分。
+            - `probs` 是一个张量，表示每个建议框属于每个类的概率。它的形状可能是 `[N, num_classes]`，其中 `N` 是建议框的数量，`num_classes` 是类的数量。
+            - `indices` 是一个张量，它的形状是 `[M, 2]`，其中 `M` 是要收集的元素数量。`indices` 的每一行表示一个要收集的元素的索引，其中第一列是建议框的索引，第二列是类的索引。
+            - `tf.gather_nd(probs, indices)` 会根据 `indices` 中的索引从 `probs` 中收集对应的类得分。它返回一个张量，其形状是 `[M]`，其中每个元素是对应建议框和类的得分。
+        通过这种方式，可以根据指定的建议框和类的索引从概率张量中提取出对应的类得分，以便进行后续的处理或分析。
+    '''
+    class_scores = tf.gather_nd(probs, indices)  # Tensor("mrcnn_detection/GatherNd:0", shape=(1000,), dtype=float32)
+
     # 还有框的调整参数
-    deltas_specific = tf.gather_nd(deltas, indices)
+    '''
+    根据索引张量取出每个建议框中对应类的边界框调整参数:
+        使用 TensorFlow 的 `tf.gather_nd()` 函数根据索引 `indices` 从张量 `deltas` 中收集特定的元素。
+            1. `deltas` 是一个张量，它可能包含了与不同建议框和类别相关的一些数据。
+            2. `indices` 是一个索引张量，它指定了要从 `deltas` 中收集的元素的位置。
+            3. `tf.gather_nd(deltas, indices)` 会根据 `indices` 中的索引值，从 `deltas` 中收集对应的元素，并将它们组合成一个新的张量 `deltas_specific`。
+    这样，`deltas_specific` 就包含了根据特定索引选择的 `deltas` 中的元素。
+    '''
+    deltas_specific = tf.gather_nd(deltas, indices)  # Tensor("mrcnn_detection/GatherNd_1:0", shape=(1000, 4), dtype=float32)
+
     # 进行解码
     # Shape: [boxes, (y1, x1, y2, x2)] in normalized coordinates
-    refined_rois = apply_box_deltas_graph(
-        rois, deltas_specific * config.BBOX_STD_DEV)
+    '''
+    使用边界框调整参数对建议框进行调整，得到细化后的边界框:        
+        1. `rois`：这是一个张量，表示建议框的坐标。它的形状可能是 `[N, 4]`，其中 `N` 是建议框的数量，每个建议框由四个坐标值（例如左上角和右下角的坐标）表示。  [N, (y1, x1, y2, x2)]
+        2. `deltas_specific`：这是一个张量，它包含了与每个建议框和类别相关的边界框调整参数。它的形状可能是 `[N, num_classes, 4]`，其中 `num_classes` 是类别的数量。 [N, num_classes, (dy, dx, log(dh), log(dw))]
+        3. `config.BBOX_STD_DEV`：这是一个配置参数，可能表示边界框调整参数的标准差。  [0.1, 0.1, 0.2, 0.2]
+        4. `deltas_specific * config.BBOX_STD_DEV`：这是对边界框调整参数进行缩放，根据标准差进行调整。
+        5. `apply_box_deltas_graph(rois, deltas_specific * config.BBOX_STD_DEV)`：将边界框的调整量应用到先验框上的功能，得到了调整后的边界框坐标
+        6. `refined_rois`：这是调整后的边界框张量，它的形状与 `rois` 相同，但包含了更精确的边界框坐标。
+    通过这种方式，可以根据建议框和对应的边界框调整参数来计算更精确的边界框，这在目标检测等任务中常用于对检测结果进行微调。
+    '''
+    refined_rois = apply_box_deltas_graph(rois, deltas_specific * config.BBOX_STD_DEV)  # Tensor("mrcnn_detection/apply_box_deltas_out:0", shape=(1000, 4), dtype=float32)
+
     # 防止超出0-1
-    refined_rois = clip_boxes_graph(refined_rois, window)
+    '''将细化后的边界框裁剪到窗口范围内，确保边界框不超出图像范围。'''
+    refined_rois = clip_boxes_graph(refined_rois, window)  # Tensor("mrcnn_detection/clipped_boxes:0", shape=(1000, 4), dtype=float32)
 
     # 去除背景
-    keep = tf.where(class_ids > 0)[:, 0]
+    '''
+    去除背景类（类 ID 为 0）的建议框:
+        使用 TensorFlow 的 `tf.where()` 函数来找到类 ID 大于 0 的建议框的索引，并将这些索引存储在变量 `keep` 中:
+            1. `class_ids` 是一个张量，表示每个建议框所属的类 ID。(每个建议框中得分最高的类的 ID)
+            2. `tf.where(class_ids > 0)` 会返回一个元组，其中第一个元素是满足条件（类 ID 大于 0）的建议框的索引，第二个元素是一个空张量。
+            3. `[:, 0]` 用于从返回的元组中选择第一个元素，即满足条件的建议框的索引。
+            4. 最终，`keep` 张量将包含类 ID 大于 0 的建议框的索引。
+        这样，`keep` 张量就可以用于后续的操作，例如保留这些建议框进行进一步的处理或分析。
+    '''
+    keep = tf.where(class_ids > 0)[:, 0]  # Tensor("mrcnn_detection/strided_slice_22:0", shape=(?,), dtype=int64)
+
     # 去除背景和得分小的区域
-    if config.DETECTION_MIN_CONFIDENCE:
+    '''
+    根据配置中的最小置信度阈值，进一步筛选建议框。 
+        1. `config.DETECTION_MIN_CONFIDENCE`：这是一个配置参数，表示最小置信度阈值。
+        2. `tf.where(class_scores >= config.DETECTION_MIN_CONFIDENCE)[:, 0]`：使用 `tf.where()` 函数找到类得分大于或等于最小置信度阈值的建议框的索引。   
+        3. `tf.expand_dims(keep, 0)` 和 `tf.expand_dims(conf_keep, 0)`： 使用 `tf.expand_dims()` 函数将 `keep` 和 `conf_keep` 张量扩展为二维张量，以便进行集合操作。
+        4. `tf.sets.set_intersection()`：这是 TensorFlow 中的集合操作函数，用于计算两个集合的交集。在这里，它用于计算 `keep` 和 `conf_keep` 的交集。
+        5. `tf.sparse_tensor_to_dense(keep)[0]`：将交集结果转换为稠密张量，并通过 `[0]` 索引获取第一维的元素，即最终保留的建议框索引。
+    综上所述，这段代码的目的是根据最小置信度阈值进一步筛选建议框，只保留类得分大于或等于该阈值的建议框。这样可以提高检测结果的准确性，减少误检。
+    '''
+    if config.DETECTION_MIN_CONFIDENCE:  # 0.7  如果设置了最小置信度阈值，则进一步去除得分低于阈值的建议框
+        # Tensor("mrcnn_detection/strided_slice_23:0", shape=(?,), dtype=int64)
         conf_keep = tf.where(class_scores >= config.DETECTION_MIN_CONFIDENCE)[:, 0]
-        keep = tf.sets.set_intersection(tf.expand_dims(keep, 0),
-                                        tf.expand_dims(conf_keep, 0))
+        # SparseTensor(indices=Tensor("mrcnn_detection/DenseToDenseSetOperation:0", shape=(?, 2), dtype=int64),
+        #              values=Tensor("mrcnn_detection/DenseToDenseSetOperation:1", shape=(?,), dtype=int64),
+        #              dense_shape=Tensor("mrcnn_detection/DenseToDenseSetOperation:2", shape=(2,), dtype=int64))
+        keep = tf.sets.set_intersection(tf.expand_dims(keep, 0), tf.expand_dims(conf_keep, 0))
+        # Tensor("mrcnn_detection/strided_slice_24:0", shape=(?,), dtype=int64)
         keep = tf.sparse_tensor_to_dense(keep)[0]
 
     # 获得除去背景并且得分较高的框还有种类与得分
     # 1. Prepare variables
+    # 收集保留下来的建议框的类 ID        Tensor("mrcnn_detection/GatherV2:0", shape=(?,), dtype=int32)
     pre_nms_class_ids = tf.gather(class_ids, keep)
+    # 收集保留下来的建议框的得分         Tensor("mrcnn_detection/GatherV2_1:0", shape=(?,), dtype=float32)
     pre_nms_scores = tf.gather(class_scores, keep)
+    # 收集保留下来的建议框的边界框坐标    Tensor("mrcnn_detection/GatherV2_2:0", shape=(?, 4), dtype=float32)
     pre_nms_rois = tf.gather(refined_rois, keep)
+    #  找到保留下来的建议框中唯一的类 ID  Tensor("mrcnn_detection/Unique:0", shape=(?,), dtype=int32)
+    '''
+    `tf.unique()` 是 TensorFlow 中的一个函数，用于查找张量中的唯一元素: 
+        tf.unique(input, out_idx=tf.int32, name=None)    
+            - `input`：要查找唯一元素的张量。
+            - `out_idx`：可选参数，指定输出的索引张量的类型。默认值为 `tf.int32`。
+        `tf.unique()` 函数返回两个张量：
+            - `output`：包含输入张量中的唯一元素。
+            - `idx`：包含每个唯一元素在输入张量中的原始索引。
+        例如，如果你有一个张量 `t` ，其中包含一些重复的元素，你可以使用 `tf.unique()` 函数来查找唯一元素，并获取它们的原始索引：
+            t = tf.constant([1, 2, 2, 3, 3, 3, 4, 4, 4, 4])
+            output, idx = tf.unique(t)
+            print(output.numpy())   -> [1, 2, 3, 4]
+            print(idx.numpy())      -> [0 1 1 2 2 2 3 3 3 3]   1 在 t 中的索引是 0，2 在 t 中的索引是 1 和 2，3 在 t 中的索引是 3、4 和 5 
+    '''
     unique_pre_nms_class_ids = tf.unique(pre_nms_class_ids)[0]
 
+    # 定义一个函数，用于对每个类进行非极大抑制（NMS）操作
     def nms_keep_map(class_id):
         ixs = tf.where(tf.equal(pre_nms_class_ids, class_id))[:, 0]
 
@@ -624,34 +728,86 @@ def refine_detections_graph(rois, probs, deltas, window, config):
             max_output_size=config.DETECTION_MAX_INSTANCES,
             iou_threshold=config.DETECTION_NMS_THRESHOLD)
 
+        # Tensor("mrcnn_detection/map/while/GatherV2_3:0", shape=(?,), dtype=int64)
         class_keep = tf.gather(keep, tf.gather(ixs, class_keep))
 
+        # Tensor("mrcnn_detection/map/while/sub:0", shape=(), dtype=int32)
         gap = config.DETECTION_MAX_INSTANCES - tf.shape(class_keep)[0]
-        class_keep = tf.pad(class_keep, [(0, gap)],
-                            mode='CONSTANT', constant_values=-1)
+        # Tensor("mrcnn_detection/map/while/PadV2:0", shape=(?,), dtype=int64)
+        class_keep = tf.pad(class_keep, [(0, gap)], mode='CONSTANT', constant_values=-1)
 
+        # <bound method Tensor.set_shape of <tf.Tensor 'mrcnn_detection/map/while/PadV2:0' shape=(100,) dtype=int64>>
         class_keep.set_shape([config.DETECTION_MAX_INSTANCES])
-        return class_keep
+        return class_keep  # Tensor("mrcnn_detection/map/while/PadV2:0", shape=(100,), dtype=int64)
 
     # 2. 进行非极大抑制
-    nms_keep = tf.map_fn(nms_keep_map, unique_pre_nms_class_ids,
-                         dtype=tf.int64)
-    # 3. 找到符合要求的需要被保留的建议框
-    nms_keep = tf.reshape(nms_keep, [-1])
+    '''
+     对每个类应用 NMS 操作，得到每个类的保留建议框的索引:
+         使用 TensorFlow 的 `tf.map_fn()` 函数对 `unique_pre_nms_class_ids` 中的每个元素应用 `nms_keep_map` 函数，并将结果存储在 `nms_keep` 张量中。
+            - `nms_keep_map` 是一个函数，它接受一个类 ID 作为输入，并返回一个布尔值，表示该类是否应该被保留。
+            - `unique_pre_nms_class_ids` 是一个张量，其中包含了唯一的类 ID。
+            - `tf.map_fn()` 函数将 `nms_keep_map` 函数应用于 `unique_pre_nms_class_ids` 中的每个元素，并将结果存储在 `nms_keep` 张量中。`dtype=tf.int64` 指定了 `nms_keep` 张量的数据类型。
+     通过这种方式，可以对每个类 ID 应用 `nms_keep_map` 函数，并得到一个布尔值张量，表示每个类是否应该被保留。这在非极大值抑制（NMS）等操作中常用于确定哪些检测框应该被保留。
+    '''
+    # Tensor("mrcnn_detection/map/TensorArrayStack/TensorArrayGatherV3:0", shape=(?, 100), dtype=int64)
+    nms_keep = tf.map_fn(nms_keep_map, unique_pre_nms_class_ids, dtype=tf.int64)
+
+    # 3. 找到符合要求的需要被保留的建议框 将 NMS 操作得到的索引张量重塑为一维张量
+    nms_keep = tf.reshape(nms_keep, [-1])  # Tensor("mrcnn_detection/Reshape:0", shape=(?,), dtype=int64)
+    '''
+    去除 NMS 操作中被抑制的建议框的索引:
+        使用 TensorFlow 的 `tf.gather()` 函数从 `nms_keep` 张量中选择满足条件的元素
+        - `tf.where(nms_keep > -1)[:, 0]` 找到 `nms_keep` 张量中大于 `-1` 的元素的索引。
+        - `tf.gather(nms_keep, tf.where(nms_keep > -1)[:, 0])` 使用这些索引从 `nms_keep` 张量中选择对应的元素。
+    '''
+    # Tensor("mrcnn_detection/GatherV2_3:0", shape=(?,), dtype=int64)
     nms_keep = tf.gather(nms_keep, tf.where(nms_keep > -1)[:, 0])
+
     # 4. Compute intersection between keep and nms_keep
-    keep = tf.sets.set_intersection(tf.expand_dims(keep, 0),
-                                    tf.expand_dims(nms_keep, 0))
+    '''
+    计算保留下来的建议框和 NMS 操作保留下来的建议框的交集:
+        使用 TensorFlow 的 `tf.sets.set_intersection()` 函数计算两个集合的交集        
+            - `tf.expand_dims(keep, 0)` 将 `keep` 张量扩展为一个二维张量，增加了一个维度。
+            - `tf.expand_dims(nms_keep, 0)` 将 `nms_keep` 张量也扩展为一个二维张量，增加了一个维度。
+            - `tf.sets.set_intersection()` 函数接受两个二维张量作为输入，并计算它们的交集。
+        通过这种方式，可以计算 `keep` 和 `nms_keep` 这两个集合的交集，并将结果存储在 `keep` 张量中。
+    '''
+    # SparseTensor(indices=Tensor("mrcnn_detection/DenseToDenseSetOperation_1:0", shape=(?, 2), dtype=int64),
+    #              values=Tensor("mrcnn_detection/DenseToDenseSetOperation_1:1", shape=(?,), dtype=int64),
+    #              dense_shape=Tensor("mrcnn_detection/DenseToDenseSetOperation_1:2", shape=(2,), dtype=int64))
+    keep = tf.sets.set_intersection(tf.expand_dims(keep, 0), tf.expand_dims(nms_keep, 0))
+
+    '''
+    将交集转换为稠密张量：
+       将稀疏张量 `keep` 转换为稠密张量，并获取转换后的稠密张量的第一维元素。
+            1. `tf.sparse_tensor_to_dense(keep)`：这是 TensorFlow 中的一个函数，用于将稀疏张量转换为稠密张量。稀疏张量通常用于表示稀疏数据，其中只有一部分元素具有非零值。
+            2. `[0]`：这是对转换后的稠密张量进行索引操作。通过 `[0]`，我们获取稠密张量的第一维元素。
+    综上所述，这行代码的效果是将稀疏张量 `keep` 转换为稠密张量，并获取该稠密张量的第一维元素。这样可以方便后续的处理和操作，特别是当需要对稠密张量进行进一步的计算或与其他张量进行交互时。
+    '''
+    # Tensor("mrcnn_detection/strided_slice_26:0", shape=(?,), dtype=int64)
     keep = tf.sparse_tensor_to_dense(keep)[0]
 
     # 寻找得分最高的num_keep个框
-    roi_count = config.DETECTION_MAX_INSTANCES
+    roi_count = config.DETECTION_MAX_INSTANCES  # 设置要保留的建议框数量  100
+    # 收集保留下来的建议框的得分  Tensor("mrcnn_detection/GatherV2_4:0", shape=(?,), dtype=float32)
     class_scores_keep = tf.gather(class_scores, keep)
+    # 根据得分和要保留的建议框数量，确定实际要保留的建议框数量  Tensor("mrcnn_detection/Minimum_4:0", shape=(), dtype=int32)
     num_keep = tf.minimum(tf.shape(class_scores_keep)[0], roi_count)
+    # 找到得分最高的前 num_keep 个建议框的索引  Tensor("mrcnn_detection/TopKV2:1", shape=(?,), dtype=int32)
     top_ids = tf.nn.top_k(class_scores_keep, k=num_keep, sorted=True)[1]
+    # 根据索引保留得分最高的建议框  Tensor("mrcnn_detection/GatherV2_5:0", shape=(?,), dtype=int64)
     keep = tf.gather(keep, top_ids)
 
     # Arrange output as [N, (y1, x1, y2, x2, class_id, score)]
+    # 将保留下来的建议框的坐标、类 ID 和得分组合成一个检测结果张量  Tensor("mrcnn_detection/concat_1:0", shape=(?, 6), dtype=float32)
+    '''
+    使用 TensorFlow 的 `tf.concat()` 函数将多个张量沿着指定的轴进行连接，形成一个新的张量 `detections`。
+        1. `tf.gather(refined_rois, keep)`：根据索引张量 `keep` 从 `refined_rois` 张量中选择对应的元素。
+        2. `tf.to_float(tf.gather(class_ids, keep))[..., tf.newaxis]`：将索引张量 `keep` 从 `class_ids` 张量中选择的元素转换为浮点数，并在最后添加一个新的维度。
+        3. `tf.gather(class_scores, keep)[..., tf.newaxis]`：根据索引张量 `keep` 从 `class_scores` 张量中选择对应的元素，并在最后添加一个新的维度。
+        4. `tf.concat([...], axis=1)`：将上述三个张量沿着第二维（`axis=1`）进行连接。
+    最终得到的 `detections` 张量将包含建议框的坐标、类 ID 和得分，这些信息将用于后续的处理或分析。
+    '''
     detections = tf.concat([
         tf.gather(refined_rois, keep),
         tf.to_float(tf.gather(class_ids, keep))[..., tf.newaxis],
@@ -659,7 +815,23 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     ], axis=1)
 
     # 如果达不到数量的话就padding
+    # 计算需要填充的数量，以确保检测结果张量的大小为 DETECTION_MAX_INSTANCES  Tensor("mrcnn_detection/sub_6:0", shape=(), dtype=int32)
+    '''
+    计算了一个差距值 `gap`，它是配置中最大检测实例数 `config.DETECTION_MAX_INSTANCES` 与检测结果张量 `detections` 的形状的第一维（通常是实例的数量）之间的差值。
+        1. `config.DETECTION_MAX_INSTANCES`：这是一个配置参数，表示最大检测实例数。
+        2. `tf.shape(detections)[0]`：使用 TensorFlow 的 `tf.shape()` 函数获取检测结果张量 `detections` 的形状，并取第一维的值，即实例的数量。
+        3. `gap = config.DETECTION_MAX_INSTANCES - tf.shape(detections)[0]`：计算最大检测实例数与实际检测实例数之间的差距。
+    这个差距值 `gap` 通常用于在需要将检测结果张量填充到固定大小的情况下。例如，如果希望检测结果张量始终具有相同的大小，即使实际检测到的实例数量少于最大数量，那么可以使用 `gap` 值来确定需要填充的额外实例的数量。
+    '''
     gap = config.DETECTION_MAX_INSTANCES - tf.shape(detections)[0]
+    # 对检测结果张量进行填充，使其大小为 DETECTION_MAX_INSTANCES  Tensor("mrcnn_detection/Pad:0", shape=(?, 6), dtype=float32)
+    '''
+    使用 TensorFlow 的 `tf.pad()` 函数对张量 `detections` 进行填充操作:
+        1. `detections`：这是要进行填充的张量。
+        2. `[(0, gap), (0, 0)]`：这是一个列表，指定了在张量的每个维度上要添加的填充数量。在这个例子中，第一个维度上添加 `gap` 个填充元素，第二个维度上不添加填充元素。
+        3. `"CONSTANT"`：这是填充的模式。`CONSTANT` 模式表示使用一个固定的值进行填充。      
+    通过执行这段代码，张量 `detections` 的大小将在第一个维度上增加 `gap` 个元素，这些元素将使用固定值进行填充。这样可以确保张量具有指定的大小，以便进行后续的处理或与其他张量进行操作。
+    '''
     detections = tf.pad(detections, [(0, gap), (0, 0)], "CONSTANT")
     return detections
 
@@ -670,14 +842,12 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     2. `shape`：表示图像的形状张量，形状为 `[2]`，其中包含图像的高度 `h` 和宽度 `w`。
     函数的主要步骤如下：
     1. 将 `shape` 张量转换为 `float32` 类型，并使用 `tf.split` 函数将其拆分为高度 `h` 和宽度 `w`。
-    2. 计算归一化的比例因子 `scale`，，通过将高度和宽度连接起来并减去常量 `1.0`。
+    2. 计算归一化的比例因子 `scale`，通过将高度和宽度连接起来并减去常量 `1.0`。
     3. 计算归一化的偏移量 `shift`，使用常量 `[0., 0., 1., 1.]`。
     4. 最后，通过将边界框减去偏移量，并除以比例因子，实现边界框的归一化。
 归一化的目的是将边界框的坐标表示为相对于图像大小的相对值，以便在不同大小的图像上进行一致的处理和比较。
 总结来说，该函数的作用是将边界框的坐标进行归一化，使其表示为相对于图像大小的相对位置。这样可以方便地在不同尺寸的图像上进行后续的处理和分析。
 '''
-
-
 def norm_boxes_graph(boxes, shape):
     h, w = tf.split(tf.cast(shape, tf.float32), 2)
     scale = tf.concat([h, w, h, w], axis=-1) - tf.constant(1.0)
@@ -695,15 +865,27 @@ class DetectionLayer(Layer):
 
     # 在 call 方法中，接收输入的参数 inputs，并将其分解为四个部分：rois（感兴趣区域）、mrcnn_class（M-RCNN 类别）、mrcnn_bbox（M-RCNN 边界框）和 image_meta（图像元数据）。
     def call(self, inputs):
-        rois = inputs[0]
-        mrcnn_class = inputs[1]
-        mrcnn_bbox = inputs[2]
-        image_meta = inputs[3]
+        rois = inputs[0]           # Tensor("ROI/packed_2:0", shape=(1, ?, 4), dtype=float32)
+        mrcnn_class = inputs[1]    # Tensor("mrcnn_class/Reshape_1:0", shape=(?, 1000, 81), dtype=float32)
+        mrcnn_bbox = inputs[2]     # Tensor("mrcnn_bbox/Reshape:0", shape=(?, ?, 81, 4), dtype=float32)
+        image_meta = inputs[3]     # Tensor("input_image_meta:0", shape=(?, 93), dtype=float32)  1+3+3+4+1+self.NUM_CLASSES(81)
 
         # 找到window的小数形式: 使用 parse_image_meta_graph 函数解析 image_meta，获取图像的形状信息，并将其赋值给变量 image_shape。
         #                     然后，使用 norm_boxes_graph 函数将 m['window'] 转换为小数形式的窗口，并将其赋值给变量 window。
+        '''
+        { 1 + 3 + 3 + 4 + 1 + self.NUM_CLASSES(81)： 
+            1-图像的唯一标识符： 'image_id': <tf.Tensor 'mrcnn_detection/strided_slice:0' shape=(?,) dtype=float32>, 
+            3-原始图像的形状： 'original_image_shape': <tf.Tensor 'mrcnn_detection/strided_slice_1:0' shape=(?, 3) dtype=float32>, 
+            3-当前图像的形状：  'image_shape': <tf.Tensor 'mrcnn_detection/strided_slice_2:0' shape=(?, 3) dtype=float32>, 
+            4-图像在窗口中的位置（以像素为单位）： 'window': <tf.Tensor 'mrcnn_detection/strided_slice_3:0' shape=(?, 4) dtype=float32>, 
+            1-图像的缩放比例： 'scale': <tf.Tensor 'mrcnn_detection/strided_slice_4:0' shape=(?,) dtype=float32>, 
+            81-活动类别的标识符：   'active_class_ids': <tf.Tensor 'mrcnn_detection/strided_slice_5:0' shape=(?, 81) dtype=float32>}
+        '''
         m = parse_image_meta_graph(image_meta)
+
+        # Tensor("mrcnn_detection/strided_slice_6:0", shape=(3,), dtype=float32)
         image_shape = m['image_shape'][0]
+        # Tensor("mrcnn_detection/truediv:0", shape=(?, 4), dtype=float32)
         window = norm_boxes_graph(m['window'], image_shape[:2])
 
         # Run detection refinement graph on each item in the batch

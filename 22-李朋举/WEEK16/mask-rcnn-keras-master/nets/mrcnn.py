@@ -64,41 +64,66 @@ def fpn_classifier_graph(rois, feature_maps, image_meta, pool_size, num_classes,
         num_classes: 81
     """
 
-    # ROI Pooling，利用建议框在特征层上进行截取
+    # 1. ROI Pooling，利用建议框在特征层上进行截取, 得到固定大小的特征图
     # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
+    # Tensor("roi_align_classifier/Reshape:0", shape=(1, ?, 7, 7, 256), dtype=float32)
     x = PyramidROIAlign([pool_size, pool_size], name="roi_align_classifier")([rois, image_meta] + feature_maps)
 
+    # 2. 使用两个时间分布的卷积层对池化后的特征图进行卷积操作，以提取特征
     # Shape: [batch, num_rois, 1, 1, fc_layers_size]，相当于两次全连接
+    '''
+    定义了一个时间分布的卷积层 `TimeDistributed(Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"))`，并将其应用于输入张量 `x`。
+        - `TimeDistributed`：这是一个 Keras 层，用于在时间维度上对输入进行分布处理。它将一个卷积层应用于输入的每个时间步，并将结果连接在一起。
+                            对FPN网络输出的多层卷积特征进行共享参数, TimeDistributed的意义在于使不同层的特征图共享权重。
+        - `Conv2D`：这是一个 2D 卷积层，用于对输入进行卷积操作。
+            - `fc_layers_size`：表示卷积核的数量或输出通道的数量。
+            - `(pool_size, pool_size)`：指定卷积核的大小。
+            - `padding="valid"`：表示使用有效的填充方式，即不进行填充。
+        - `x`：是输入张量，可能是一个包含时间序列数据的张量。
+    通过将时间分布的卷积层应用于 `x`，代码可以在每个时间步对输入进行卷积操作，并将结果合并在一起。这样可以在时间维度上提取特征，并为后续的处理或分类任务提供输入。
+    '''
     x = TimeDistributed(Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"), name="mrcnn_class_conv1")(x)
     x = TimeDistributed(BatchNormalization(), name='mrcnn_class_bn1')(x, training=train_bn)
-    x = Activation('relu')(x)
-    '''
-    TimeDistributed:
-    对FPN网络输出的多层卷积特征进行共享参数, TimeDistributed的意义在于使不同层的特征图共享权重。
-    '''
+    x = Activation('relu')(x)  # Tensor("activation_68/Relu:0", shape=(?, 1000, 1, 1, 1024), dtype=float32)
+
     # Shape: [batch, num_rois, 1, 1, fc_layers_size]
     x = TimeDistributed(Conv2D(fc_layers_size, (1, 1)), name="mrcnn_class_conv2")(x)
     x = TimeDistributed(BatchNormalization(), name='mrcnn_class_bn2')(x, training=train_bn)
-    x = Activation('relu')(x)
+    x = Activation('relu')(x)  # Tensor("activation_69/Relu:0", shape=(?, 1000, 1, 1, 1024), dtype=float32)
 
-    # Shape: [batch, num_rois, fc_layers_size]
+    # 3. 通过 Lambda 层对卷积后的特征图进行压缩，得到共享特征  Shape: [batch, num_rois, fc_layers_size]
+    '''
+    使用了 Keras 中的 `Lambda` 层来对输入张量进行压缩操作:        
+            1. `Lambda` 层是 Keras 中用于定义自定义函数的层。在这里，我们定义了一个名为 `pool_squeeze` 的函数。
+            2. 函数的输入是张量 `x`。
+            3. `K.squeeze(K.squeeze(x, 3), 2)` 是对输入张量进行压缩的操作。它的作用是将张量的维度进行压缩，去除维度为 1 的部分。
+               - `K.squeeze(x, 3)` 表示在第 3 维上进行压缩，即去除维度为 1 的部分。
+               - `K.squeeze(K.squeeze(x, 3), 2)` 表示在第 2 维上再次进行压缩，去除维度为 1 的部分。
+            4. 最后，将压缩后的张量赋值给变量 `shared`。
+    Tensor("activation_69/Relu:0", shape=(?, 1000, 1, 1, 1024), dtype=float32) -> Tensor("pool_squeeze/Squeeze_1:0", shape=(?, 1000, 1024), dtype=float32)
+    '''
     shared = Lambda(lambda x: K.squeeze(K.squeeze(x, 3), 2), name="pool_squeeze")(x)
 
-    # Classifier head
-    # 这个的预测结果代表这个先验框内部的物体的种类
-    mrcnn_class_logits = TimeDistributed(Dense(num_classes),
-                                         name='mrcnn_class_logits')(shared)
-    mrcnn_probs = TimeDistributed(Activation("softmax"),
-                                  name="mrcnn_class")(mrcnn_class_logits)
+    # 4. 分别使用全连接层和激活函数对共享特征进行分类和概率预测，并使用全连接层对边界框进行回归预测
+    # Classifier head  这个的预测结果代表这个先验框内部的物体的种类
+    '''
+    使用时间分布的全连接层对共享特征进行分类，得到分类结果 mrcnn_class_logits  Tensor("mrcnn_class_logits/Reshape_1:0", shape=(?, 1000, 81), dtype=float32)
+    '''
+    mrcnn_class_logits = TimeDistributed(Dense(num_classes), name='mrcnn_class_logits')(shared)
+    '''
+    使用激活函数 softmax 对分类结果进行概率预测，得到分类概率 mrcnn_probs     Tensor("mrcnn_class/Reshape_1:0", shape=(?, 1000, 81), dtype=float32)
+    '''
+    mrcnn_probs = TimeDistributed(Activation("softmax"), name="mrcnn_class")(mrcnn_class_logits)
 
-    # BBox head
-    # 这个的预测结果会对先验框进行调整
-    # [batch, num_rois, NUM_CLASSES * (dy, dx, log(dh), log(dw))]
-    x = TimeDistributed(Dense(num_classes * 4, activation='linear'),
-                        name='mrcnn_bbox_fc')(shared)
-    # Reshape to [batch, num_rois, NUM_CLASSES, (dy, dx, log(dh), log(dw))]
-    mrcnn_bbox = Reshape((-1, num_classes, 4), name="mrcnn_bbox")(x)
+    # BBox head 这个的预测结果会对先验框进行调整  [batch, num_rois, NUM_CLASSES * (dy, dx, log(dh), log(dw))]
+    x = TimeDistributed(Dense(num_classes * 4, activation='linear'), name='mrcnn_bbox_fc')(shared)  # Tensor("mrcnn_bbox_fc/Reshape_1:0", shape=(?, 1000, 324), dtype=float32)
+    '''
+    使用时间分布的全连接层对共享特征进行边界框回归，得到回归结果 mrcnn_bbox   
+        Reshape to [batch, num_rois, NUM_CLASSES, (dy, dx, log(dh), log(dw))]   Tensor("mrcnn_bbox/Reshape:0", shape=(?, ?, 81, 4), dtype=float32)
+    '''
+    mrcnn_bbox = Reshape((-1, num_classes, 4), name="mrcnn_bbox")(x)  #
 
+    # 返回分类结果 mrcnn_class_logits、分类概率 mrcnn_probs 和边界框回归结果 mrcnn_bbox。
     return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
 
 
@@ -107,43 +132,32 @@ def build_fpn_mask_graph(rois, feature_maps, image_meta,
                          pool_size, num_classes, train_bn=True):
     # ROI Align，利用建议框在特征层上进行截取
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
-    x = PyramidROIAlign([pool_size, pool_size],
-                        name="roi_align_mask")([rois, image_meta] + feature_maps)
+    x = PyramidROIAlign([pool_size, pool_size], name="roi_align_mask")([rois, image_meta] + feature_maps)
 
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
-    x = TimeDistributed(Conv2D(256, (3, 3), padding="same"),
-                        name="mrcnn_mask_conv1")(x)
-    x = TimeDistributed(BatchNormalization(),
-                        name='mrcnn_mask_bn1')(x, training=train_bn)
+    x = TimeDistributed(Conv2D(256, (3, 3), padding="same"), name="mrcnn_mask_conv1")(x)
+    x = TimeDistributed(BatchNormalization(), name='mrcnn_mask_bn1')(x, training=train_bn)
     x = Activation('relu')(x)
 
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
-    x = TimeDistributed(Conv2D(256, (3, 3), padding="same"),
-                        name="mrcnn_mask_conv2")(x)
-    x = TimeDistributed(BatchNormalization(),
-                        name='mrcnn_mask_bn2')(x, training=train_bn)
+    x = TimeDistributed(Conv2D(256, (3, 3), padding="same"), name="mrcnn_mask_conv2")(x)
+    x = TimeDistributed(BatchNormalization(), name='mrcnn_mask_bn2')(x, training=train_bn)
     x = Activation('relu')(x)
 
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
-    x = TimeDistributed(Conv2D(256, (3, 3), padding="same"),
-                        name="mrcnn_mask_conv3")(x)
-    x = TimeDistributed(BatchNormalization(),
-                        name='mrcnn_mask_bn3')(x, training=train_bn)
+    x = TimeDistributed(Conv2D(256, (3, 3), padding="same"), name="mrcnn_mask_conv3")(x)
+    x = TimeDistributed(BatchNormalization(), name='mrcnn_mask_bn3')(x, training=train_bn)
     x = Activation('relu')(x)
 
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
-    x = TimeDistributed(Conv2D(256, (3, 3), padding="same"),
-                        name="mrcnn_mask_conv4")(x)
-    x = TimeDistributed(BatchNormalization(),
-                        name='mrcnn_mask_bn4')(x, training=train_bn)
+    x = TimeDistributed(Conv2D(256, (3, 3), padding="same"), name="mrcnn_mask_conv4")(x)
+    x = TimeDistributed(BatchNormalization(), name='mrcnn_mask_bn4')(x, training=train_bn)
     x = Activation('relu')(x)
 
     # Shape: [batch, num_rois, 2xMASK_POOL_SIZE, 2xMASK_POOL_SIZE, channels]
-    x = TimeDistributed(Conv2DTranspose(256, (2, 2), strides=2, activation="relu"),
-                        name="mrcnn_mask_deconv")(x)
+    x = TimeDistributed(Conv2DTranspose(256, (2, 2), strides=2, activation="relu"), name="mrcnn_mask_deconv")(x)
     # 反卷积后再次进行一个1x1卷积调整通道，使其最终数量为numclasses，代表分的类
-    x = TimeDistributed(Conv2D(num_classes, (1, 1), strides=1, activation="sigmoid"),
-                        name="mrcnn_mask")(x)
+    x = TimeDistributed(Conv2D(num_classes, (1, 1), strides=1, activation="sigmoid"), name="mrcnn_mask")(x)
     return x
 
 
