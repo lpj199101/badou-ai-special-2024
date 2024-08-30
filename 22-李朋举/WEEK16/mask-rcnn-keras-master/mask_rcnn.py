@@ -110,24 +110,53 @@ class MASK_RCNN(object):
         self.model.load_weights(self.model_path, by_name=True)
 
     # ---------------------------------------------------#
-    #   检测图片
+    #   4.检测图片
     # ---------------------------------------------------#
-    def detect_image(self, image):
-        image = [np.array(image)]
+    def detect_image(self, image):  # <PIL.JpegImagePlugin.JpegImageFile image mode=RGB size=1330x1330 at 0x19CB7C21208>
+        # 将输入的图像转换为 NumPy 数组，并将其封装在一个列表中
+        image = [np.array(image)]  #
+        # 使用 mold_inputs 函数对图像进行预处理，得到处理后的图像、图像元数据和窗口信息
+        '''
+        [array([[[255, 255, 255],
+        ...,
+        [ 41,  50,  57],
+        [ 43,  54,  60],
+        [ 43,  54,  60]],
+        ...
+        [108, 108, 110]]], dtype=uint8)]
+        '''
         molded_images, image_metas, windows = mold_inputs(self.config, image)
-
+        # 获取处理后图像的形状  (1024,1024,3)
         image_shape = molded_images[0].shape
+        # 根据图像形状获取锚点
+        '''
+        使用 NumPy 的 `broadcast_to` 函数将 `anchors` 数组广播到新的形状。
+            `np.broadcast_to` 函数的作用是将输入数组按照指定的形状进行广播，使其在维度上与目标形状匹配。在广播过程中，数组的元素会根据需要进行复制，以填充目标形状中的每个位置。
+            在这段代码中，`anchors` 是一个数组，`(1,) + anchors.shape` 是一个新的形状，其中 `1` 表示在第一个维度上添加一个长度为 1 的维度。
+            通过调用 `np.broadcast_to(anchors, (1,) + anchors.shape)`，将 `anchors` 数组广播到新的形状，从而在第一个维度上添加了一个长度为 1 的维度。
+            目的是为了在后续的计算中对 `anchors` 数组进行扩展或添加额外的维度，以便与其他数组进行操作或计算。            
+        '''
         anchors = get_anchors(self.config, image_shape)
+        # 将锚点广播到与处理后图像相同的形状。
         anchors = np.broadcast_to(anchors, (1,) + anchors.shape)
-
+        # 使用模型对处理后的图像进行预测，得到检测结果、掩码等信息
+        '''
+        从 `self.model.predict` 函数中获取返回值的一部分，并将它们分别赋值给变量 `detections`、`_`、`_`、`mrcnn_mask`、`_`、`_` 和 `_`:
+            - `detections`：这是模型的检测结果，可能包含关于检测到的对象的信息，如位置、类别、置信度等。
+            - `mrcnn_mask`：这是模型生成的掩码（mask），用于表示检测到的对象的形状或轮廓。
+            - `_`（下划线）：这些下划线表示未使用或不重要的返回值。在这种情况下，可能是模型的其他输出或中间结果，但在当前代码中没有被进一步处理或使用。
+        总的来说，这段代码从模型的预测结果中提取了检测结果和掩码，并将它们分别存储在 `detections` 和 `mrcnn_mask` 变量中，而其他返回值则被忽略。这些结果可以用于后续的处理、分析或可视化，具体取决于应用的需求。
+        \ ： 表示续行符，反斜杠表示将下一行的代码视为当前行的延续 ，如果需要将一行代码拆分成多行，可以使用反斜杠作为续行符
+        '''
         detections, _, _, mrcnn_mask, _, _, _ = \
             self.model.predict([molded_images, image_metas, anchors], verbose=0)
 
+        # 使用 unmold_detections 函数将预测结果转换为最终的检测框、类别 ID、得分和掩码
         final_rois, final_class_ids, final_scores, final_masks = \
             unmold_detections(detections[0], mrcnn_mask[0],
                               image[0].shape, molded_images[0].shape,
                               windows[0])
-
+        # 将检测结果存储在一个字典中
         r = {
             "rois": final_rois,
             "class_ids": final_class_ids,
@@ -135,9 +164,8 @@ class MASK_RCNN(object):
             "masks": final_masks,
         }
 
-        # 画图(开源工具)
-        visualize.display_instances(image[0], r['rois'], r['masks'], r['class_ids'],
-                                    self.class_names, r['scores'])
+        # 画图(开源工具) 使用可视化工具显示检测结果，包括图像、检测框、掩码、类别 ID 和得分
+        visualize.display_instances(image[0], r['rois'], r['masks'], r['class_ids'], self.class_names, r['scores'])
 
     def close_session(self):
         self.sess.close()
