@@ -743,7 +743,7 @@ def compose_image_meta(image_id, original_image_shape, image_shape, window, scal
     )
     return meta  # 返回组合好的图像元数据数组
 
-# ？？？
+# 图像预处理
 def mold_inputs(config, images):
     # 创建一个空列表 molded_images，用于存储处理后的图像
     molded_images = []
