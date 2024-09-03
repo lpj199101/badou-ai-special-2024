@@ -246,7 +246,7 @@ def get_predict_model(config):
     anchors = input_anchors  # Tensor("input_anchors:0", shape=(?, ?, 4), dtype=float32)
 
     # --------------------------------------------------------------------------------------------------------------------------#
-    #  【网络结构-2.RPN部分】 分支1：正负(每个框对于所有类别) + 分支2：偏移量 + ProposalLayer合并分支1、2得到每个点的建议框
+    #  【网络结构-2.RPN部分】 分支1：二值分类-正负(每个框对于所有类别) + 分支2：BB回归-偏移量 + ProposalLayer合并分支1、2得到每个点的建议框
     #             RPN分支1    分类结果-对每个分类正负 上面一条通过softmax分类anchors，获得positive和negative分类
     #             RPN分支2    回归结果-偏移量  下面一条用于计算对于计算对于 anchors的bouding box regression偏移量，以获取精确的proposal
     #             Proposal层  负责综合positive anchors 和对应的bouding box regression偏移量获取proposals同时剔除太小和超出边界的proposals

@@ -53,7 +53,7 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2),
 def get_resnet(input_image, stage5=False, train_bn=True):
 
     # Stage 1  (?, ?, ?, 3) -> (?, ?, ?, 64)
-    x = ZeroPadding2D((3, 3))(input_image)  # 对输入图像进行零填充，使其在水平和垂直方向上各增加 3 个像素。
+    x = ZeroPadding2D((3, 3))(input_image)  # 对输入图像进行零填充，使其在水平和垂直方向上各增加 3 个像素
     x = Conv2D(64, (7, 7), strides=(2, 2), name='conv1', use_bias=True)(x)  # 使用 7x7 的卷积核对填充后的图像进行卷积操作，输出通道数为 64，步长为 2
     x = BatchNormalization(name='bn_conv1')(x, training=train_bn)  # 对卷积后的结果进行批量归一化处理
     x = Activation('relu')(x)  # 使用 ReLU 激活函数对归一化后的结果进行激活

@@ -104,7 +104,7 @@ class MASK_RCNN(object):
         # 计算总的种类
         self.num_classes = len(self.class_names)  # 81
 
-        # 载入模型，如果原来的模型里已经包括了模型结构则直接载入。
+        # 载入模型，如果原来的模型里已经包括了模型结构则直接载入
         # 否则先构建模型再载入
         self.model = get_predict_model(self.config)
         self.model.load_weights(self.model_path, by_name=True)
