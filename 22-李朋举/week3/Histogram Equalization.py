@@ -5,6 +5,13 @@ import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 
+# 获取图像 1-彩色模式 0-灰度模式
+img = cv2.imread("D:\cv_workspace\picture\lenna.png", 1)
+# 获取灰度图像
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+
+# 灰度图像直方图均衡化
 '''
 equalizeHist—直方图均衡化 - 使直方图大致平和
     直方图均衡就是让图像的像素个数多的灰度级拉的更宽，对像素个数少的灰度级进行压缩，从而达到提高图像的对比度的目的。
@@ -12,17 +19,12 @@ equalizeHist—直方图均衡化 - 使直方图大致平和
     函数原型： equalizeHist(src, dst=None)  
                           src：图像矩阵(单通道图像)   dst：默认即可
 '''
-
-# 获取图像
-img = cv2.imread("D:\cv_workspace\picture\lenna.png", 1)
-# 获取灰度图像
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-# 灰度图像直方图均衡化
 dst = cv2.equalizeHist(gray)
 
 # 计算直方图
 '''
-计算图像的直方图。可以用于统计图像中各个像素值的出现次数，或者计算图像中某个区域的直方图。
+计算均衡化后的图像dst的直方图。可以用于统计图像中各个像素值的出现次数，或者计算图像中某个区域的直方图。
+[dst]表示输入图像，[0]表示通道索引（这里是灰度图像，只有一个通道），None表示掩码，[256]表示直方图的大小，[0, 256]表示直方图的范围。
 cv2.calcHist(images, channels, mask, histSize, ranges, accumulate=False)
     参数说明：
     - `images`：输入图像的数组，可以是多通道图像，格式为`numpy.ndarray`。当传入函数时应 用中括号 [] 括来例如[img]

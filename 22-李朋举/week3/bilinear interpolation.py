@@ -5,7 +5,9 @@ import numpy as np
 import cv2
 
 '''
-python implementation of bilinear interpolation
+双线性插值(bilinear interpolation)
+   通过双线性插值的方法算出dst中每一个像素点的像素值：是通过dst像素点的坐标对应到src图像当中的坐标，然后通过双线性插值的方法算出src中相应坐标的像素值
+   双线性差值法的计算比最邻近插值法复杂，计算量较大，但没有灰度不连续的缺点，图像看起来更光滑。
 '''
 
 
